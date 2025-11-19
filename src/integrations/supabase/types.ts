@@ -14,16 +14,269 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      alerts: {
+        Row: {
+          acknowledged: boolean | null
+          alert_type: string
+          created_at: string | null
+          id: string
+          message: string
+          session_id: string
+          severity: string
+          student_id: string
+        }
+        Insert: {
+          acknowledged?: boolean | null
+          alert_type: string
+          created_at?: string | null
+          id?: string
+          message: string
+          session_id: string
+          severity: string
+          student_id: string
+        }
+        Update: {
+          acknowledged?: boolean | null
+          alert_type?: string
+          created_at?: string | null
+          id?: string
+          message?: string
+          session_id?: string
+          severity?: string
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "alerts_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "monitoring_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "alerts_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      attention_metrics: {
+        Row: {
+          attention_score: number
+          face_detected: boolean
+          id: string
+          session_id: string
+          status: Database["public"]["Enums"]["attention_status"]
+          timestamp: string | null
+        }
+        Insert: {
+          attention_score: number
+          face_detected: boolean
+          id?: string
+          session_id: string
+          status: Database["public"]["Enums"]["attention_status"]
+          timestamp?: string | null
+        }
+        Update: {
+          attention_score?: number
+          face_detected?: boolean
+          id?: string
+          session_id?: string
+          status?: Database["public"]["Enums"]["attention_status"]
+          timestamp?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "attention_metrics_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "monitoring_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      class_students: {
+        Row: {
+          class_id: string
+          id: string
+          joined_at: string | null
+          student_id: string
+        }
+        Insert: {
+          class_id: string
+          id?: string
+          joined_at?: string | null
+          student_id: string
+        }
+        Update: {
+          class_id?: string
+          id?: string
+          joined_at?: string | null
+          student_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "class_students_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "class_students_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      classes: {
+        Row: {
+          created_at: string | null
+          id: string
+          name: string
+          teacher_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          name: string
+          teacher_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          name?: string
+          teacher_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "classes_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      monitoring_sessions: {
+        Row: {
+          average_attention_score: number | null
+          class_id: string | null
+          ended_at: string | null
+          id: string
+          started_at: string | null
+          status: string | null
+          student_id: string
+          tab_switches: number | null
+          total_distraction_time_seconds: number | null
+          total_duration_seconds: number | null
+        }
+        Insert: {
+          average_attention_score?: number | null
+          class_id?: string | null
+          ended_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          student_id: string
+          tab_switches?: number | null
+          total_distraction_time_seconds?: number | null
+          total_duration_seconds?: number | null
+        }
+        Update: {
+          average_attention_score?: number | null
+          class_id?: string | null
+          ended_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          student_id?: string
+          tab_switches?: number | null
+          total_distraction_time_seconds?: number | null
+          total_duration_seconds?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "monitoring_sessions_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "monitoring_sessions_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string | null
+          full_name: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name: string
+          id: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string | null
+          full_name?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "student" | "teacher" | "admin"
+      attention_status: "focused" | "distracted" | "drowsy"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +403,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["student", "teacher", "admin"],
+      attention_status: ["focused", "distracted", "drowsy"],
+    },
   },
 } as const

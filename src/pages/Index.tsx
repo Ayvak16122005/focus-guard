@@ -1,11 +1,20 @@
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Eye, BarChart3, Shield, Bell, Users, TrendingUp } from "lucide-react";
+import { Eye, BarChart3, Shield, Bell, Users, TrendingUp, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 
 const Index = () => {
   const navigate = useNavigate();
+  const { user, profile, signOut } = useAuth();
+
+  const handleNavigation = (path: string) => {
+    if (!user) {
+      navigate("/auth");
+    } else {
+      navigate(path);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -13,6 +22,18 @@ const Index = () => {
       <section className="relative overflow-hidden bg-gradient-primary py-20 px-6">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center text-white">
+            {user && (
+              <div className="absolute top-4 right-4">
+                <Button
+                  variant="outline"
+                  onClick={signOut}
+                  className="border-white bg-transparent text-white hover:bg-white/10"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </Button>
+              </div>
+            )}
             <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-white/20 px-4 py-2 backdrop-blur-sm">
               <Shield className="h-4 w-4" />
               <span className="text-sm font-medium">AI-Powered Attention Monitoring</span>
@@ -20,6 +41,11 @@ const Index = () => {
             <h1 className="mb-6 text-5xl font-bold leading-tight md:text-6xl">
               FocusWatch
             </h1>
+            {user && profile && (
+              <p className="mb-4 text-lg text-white/90">
+                Welcome back, {profile.full_name}!
+              </p>
+            )}
             <p className="mb-8 text-xl text-white/90 md:text-2xl">
               Real-time student engagement monitoring for online classes
             </p>
@@ -30,16 +56,16 @@ const Index = () => {
             <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
               <Button
                 size="lg"
-                onClick={() => navigate("/student")}
+                onClick={() => handleNavigation("/student")}
                 className="bg-white text-primary hover:bg-white/90"
               >
                 <Users className="mr-2 h-5 w-5" />
-                Join as Student
+                {user ? "Start Monitoring" : "Join as Student"}
               </Button>
               <Button
                 size="lg"
                 variant="outline"
-                onClick={() => navigate("/teacher")}
+                onClick={() => handleNavigation("/teacher")}
                 className="border-white bg-transparent text-white hover:bg-white/10"
               >
                 <BarChart3 className="mr-2 h-5 w-5" />
