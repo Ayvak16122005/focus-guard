@@ -23,7 +23,16 @@ const Index = () => {
         <div className="container mx-auto max-w-6xl">
           <div className="text-center text-white">
             {user && (
-              <div className="absolute top-4 right-4">
+              <div className="absolute top-4 right-4 flex gap-2">
+                {profile?.role === "teacher" && (
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate("/teacher/classes")}
+                    className="border-white bg-transparent text-white hover:bg-white/10"
+                  >
+                    My Classes
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   onClick={signOut}
