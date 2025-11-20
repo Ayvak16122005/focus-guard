@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { detectFaceAndAttention } from "@/lib/faceDetection";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 
 const StudentMonitor = () => {
   const navigate = useNavigate();
@@ -34,8 +36,29 @@ const StudentMonitor = () => {
   const [tabVisible, setTabVisible] = useState(true);
   const [faceDetected, setFaceDetected] = useState(true);
   const [sessionTime, setSessionTime] = useState(0);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const alertSoundRef = useRef<HTMLAudioElement | null>(null);
   const previousStatusRef = useRef<"attentive" | "distracted" | "drowsy">("attentive");
+
+  // Fetch student's enrolled classes
+  const { data: enrolledClasses } = useQuery({
+    queryKey: ["student-classes"],
+    queryFn: async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return [];
+
+      const { data, error } = await supabase
+        .from("class_students")
+        .select(`
+          class_id,
+          classes(id, name, is_active)
+        `)
+        .eq("student_id", user.id);
+
+      if (error) throw error;
+      return data?.map(item => item.classes).filter(Boolean) || [];
+    },
+  });
 
   // Track tab visibility
   useEffect(() => {

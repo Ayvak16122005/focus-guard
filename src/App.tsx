@@ -7,6 +7,9 @@ import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import StudentMonitor from "./pages/StudentMonitor";
 import TeacherDashboard from "./pages/TeacherDashboard";
+import TeacherClasses from "./pages/TeacherClasses";
+import TeacherClassMonitor from "./pages/TeacherClassMonitor";
+import JoinClass from "./pages/JoinClass";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
 
@@ -29,6 +32,21 @@ const App = () => (
           <Route path="/teacher" element={
             <ProtectedRoute>
               <TeacherDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/teacher/classes" element={
+            <ProtectedRoute>
+              <TeacherClasses />
+            </ProtectedRoute>
+          } />
+          <Route path="/teacher/class/:classId" element={
+            <ProtectedRoute>
+              <TeacherClassMonitor />
+            </ProtectedRoute>
+          } />
+          <Route path="/join/:code?" element={
+            <ProtectedRoute>
+              <JoinClass />
             </ProtectedRoute>
           } />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

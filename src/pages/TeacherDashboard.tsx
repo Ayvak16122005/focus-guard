@@ -47,6 +47,10 @@ const TeacherDashboard = () => {
   const navigate = useNavigate();
   const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
 
+  const handleManageClasses = () => {
+    navigate("/teacher/classes");
+  };
+
   const getStatusBadge = (status: string, distracted: number) => {
     if (distracted >= 60) {
       return (
@@ -96,7 +100,9 @@ const TeacherDashboard = () => {
             Back to Home
           </Button>
           <h1 className="text-2xl font-bold text-foreground">Teacher Dashboard</h1>
-          <div className="w-24" />
+          <Button onClick={handleManageClasses}>
+            Manage Classes
+          </Button>
         </div>
 
         {/* Stats Overview */}
