@@ -62,7 +62,7 @@ export const detectFaceAndAttention = async (
   canvas: HTMLCanvasElement
 ): Promise<{
   faceDetected: boolean;
-  status: "focused" | "distracted" | "drowsy";
+  status: "attentive" | "distracted" | "drowsy";
   attentionScore: number;
 }> => {
   if (!detector) {
@@ -115,7 +115,7 @@ export const detectFaceAndAttention = async (
     const { horizontalDeviation, verticalDeviation } = calculateHeadPose(landmarks);
 
     // Determine attention status
-    let status: "focused" | "distracted" | "drowsy" = "focused";
+    let status: "attentive" | "distracted" | "drowsy" = "attentive";
     let attentionScore = 100;
 
     // EAR threshold for drowsiness (typical value: 0.2-0.25)
@@ -137,7 +137,7 @@ export const detectFaceAndAttention = async (
     }
 
     // Adjust score based on deviations
-    if (status === "focused") {
+    if (status === "attentive") {
       const posePenalty = (horizontalDeviation + verticalDeviation) * 200;
       attentionScore = Math.max(70, 100 - posePenalty);
     }

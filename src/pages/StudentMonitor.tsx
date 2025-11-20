@@ -19,15 +19,23 @@ import { detectFaceAndAttention } from "@/lib/faceDetection";
 const StudentMonitor = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  
+  // Initialize alert sound
+  useEffect(() => {
+    alertSoundRef.current = new Audio("/alert-sound.mp3");
+    alertSoundRef.current.volume = 0.5;
+  }, []);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [attentionScore, setAttentionScore] = useState(100);
-  const [status, setStatus] = useState<"focused" | "distracted" | "drowsy">("focused");
+  const [status, setStatus] = useState<"attentive" | "distracted" | "drowsy">("attentive");
   const [distractionTime, setDistractionTime] = useState(0);
   const [tabVisible, setTabVisible] = useState(true);
   const [faceDetected, setFaceDetected] = useState(true);
   const [sessionTime, setSessionTime] = useState(0);
+  const alertSoundRef = useRef<HTMLAudioElement | null>(null);
+  const previousStatusRef = useRef<"attentive" | "distracted" | "drowsy">("attentive");
 
   // Track tab visibility
   useEffect(() => {
@@ -59,7 +67,42 @@ const StudentMonitor = () => {
     return () => clearInterval(timer);
   }, [isMonitoring]);
 
-  // Distraction timer and alerts
+  // Immediate alert system for status changes
+  useEffect(() => {
+    if (previousStatusRef.current !== status) {
+      if (status === "distracted") {
+        // Play alert sound
+        alertSoundRef.current?.play().catch(console.error);
+        
+        // Show visual alert
+        toast({
+          title: "⚠️ Distraction Detected",
+          description: "Please focus on the class. Looking away detected.",
+          variant: "destructive",
+        });
+      } else if (status === "drowsy") {
+        // Play alert sound
+        alertSoundRef.current?.play().catch(console.error);
+        
+        // Show visual alert
+        toast({
+          title: "😴 Drowsiness Alert",
+          description: "You appear drowsy. Please stay alert and focused!",
+          variant: "destructive",
+        });
+      } else if (status === "attentive" && previousStatusRef.current !== "attentive") {
+        // Student returned to being attentive
+        toast({
+          title: "✓ Back to Focus",
+          description: "Great! You're now paying attention.",
+        });
+      }
+      
+      previousStatusRef.current = status;
+    }
+  }, [status, toast]);
+
+  // Distraction timer and extended alerts
   useEffect(() => {
     if (status === "distracted" || status === "drowsy") {
       const timer = setInterval(() => {
@@ -144,7 +187,7 @@ const StudentMonitor = () => {
 
   const getStatusColor = () => {
     switch (status) {
-      case "focused":
+      case "attentive":
         return "text-success";
       case "distracted":
         return "text-warning";
@@ -157,11 +200,11 @@ const StudentMonitor = () => {
 
   const getStatusBadge = () => {
     switch (status) {
-      case "focused":
+      case "attentive":
         return (
           <Badge className="bg-success text-success-foreground">
             <CheckCircle2 className="mr-1 h-3 w-3" />
-            Focused
+            Attentive
           </Badge>
         );
       case "distracted":
