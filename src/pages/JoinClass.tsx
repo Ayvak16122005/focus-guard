@@ -22,35 +22,38 @@ const JoinClass = () => {
   }, [code]);
 
   // Fetch class by join code
-  const fetchClassData = async (code: string): Promise<any> => {
+  const fetchClassData = async (code: string) => {
     if (!code) return null;
 
     try {
-      const result: any = await supabase
+      // @ts-ignore - Supabase type inference issue with complex queries
+      const classQuery: any = supabase
         .from("classes")
         .select("*")
         .eq("join_code", code.toUpperCase())
         .eq("is_active", true)
         .maybeSingle();
+      
+      const { data: classData, error: classError } = await classQuery;
 
-      if (result.error) throw result.error;
-      if (!result.data) return null;
+      if (classError) throw classError;
+      if (!classData) return null;
 
-      const teacherResult: any = await supabase
+      const { data: teacherData } = await supabase
         .from("profiles")
         .select("full_name")
-        .eq("id", result.data.teacher_id)
+        .eq("id", classData.teacher_id)
         .single();
 
-      const countResult: any = await supabase
+      const { count } = await supabase
         .from("class_students")
         .select("*", { count: "exact", head: true })
-        .eq("class_id", result.data.id);
+        .eq("class_id", classData.id);
 
       return {
-        ...result.data,
-        profiles: teacherResult.data,
-        class_students: [{ count: countResult.count || 0 }],
+        ...classData,
+        profiles: teacherData,
+        class_students: [{ count: count || 0 }],
       };
     } catch (error) {
       console.error("Error fetching class:", error);
@@ -58,7 +61,7 @@ const JoinClass = () => {
     }
   };
 
-  const { data: classData, isLoading } = useQuery<any>({
+  const { data: classData, isLoading } = useQuery({
     queryKey: ["class-by-code", joinCode],
     queryFn: () => fetchClassData(joinCode),
     enabled: joinCode.length === 6,
@@ -73,7 +76,7 @@ const JoinClass = () => {
       if (!userResult.data.user) throw new Error("Not authenticated");
 
       // Check if already enrolled
-      const existing: any = await supabase
+      const existing = await supabase
         .from("class_students")
         .select()
         .eq("class_id", classData.id)
@@ -84,7 +87,7 @@ const JoinClass = () => {
         return { alreadyEnrolled: true };
       }
 
-      const insertResult: any = await supabase
+      const insertResult = await supabase
         .from("class_students")
         .insert({
           class_id: classData.id,
