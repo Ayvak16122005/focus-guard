@@ -118,17 +118,26 @@ export const detectFaceAndAttention = async (
     let status: "attentive" | "distracted" | "drowsy" = "attentive";
     let attentionScore = 100;
 
-    // EAR threshold for drowsiness (typical value: 0.2-0.25)
-    const EAR_THRESHOLD = 0.22;
+    // More sensitive EAR thresholds for better drowsiness/sleep detection
+    const EAR_SLEEP_THRESHOLD = 0.15; // Eyes fully or nearly closed (sleeping)
+    const EAR_DROWSY_THRESHOLD = 0.20; // Eyes drooping (drowsy)
     
     // Head pose thresholds (normalized values)
     const HORIZONTAL_THRESHOLD = 0.05;
     const VERTICAL_THRESHOLD = 0.08;
 
-    if (avgEAR < EAR_THRESHOLD) {
+    // Priority 1: Check for sleeping (eyes fully closed)
+    if (avgEAR < EAR_SLEEP_THRESHOLD) {
+      status = "drowsy";
+      attentionScore = 20; // Very low score for sleeping
+    }
+    // Priority 2: Check for drowsiness (eyes drooping)
+    else if (avgEAR < EAR_DROWSY_THRESHOLD) {
       status = "drowsy";
       attentionScore = 40;
-    } else if (
+    }
+    // Priority 3: Check for head pose distraction
+    else if (
       horizontalDeviation > HORIZONTAL_THRESHOLD ||
       verticalDeviation > VERTICAL_THRESHOLD
     ) {
