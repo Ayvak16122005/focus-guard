@@ -17,7 +17,6 @@ const TeacherClasses = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [newClassName, setNewClassName] = useState("");
-  const [newClassDescription, setNewClassDescription] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 
   // Fetch teacher's classes
@@ -47,7 +46,6 @@ const TeacherClasses = () => {
         .from("classes")
         .insert({
           name: newClassName,
-          description: newClassDescription,
           teacher_id: user.id,
         })
         .select()
@@ -59,7 +57,6 @@ const TeacherClasses = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["teacher-classes"] });
       setNewClassName("");
-      setNewClassDescription("");
       setIsCreateDialogOpen(false);
       toast({
         title: "✓ Class Created",
@@ -134,15 +131,6 @@ const TeacherClasses = () => {
                     onChange={(e) => setNewClassName(e.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description (Optional)</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Brief description of the class"
-                    value={newClassDescription}
-                    onChange={(e) => setNewClassDescription(e.target.value)}
-                  />
-                </div>
               </div>
               <DialogFooter>
                 <Button
@@ -178,9 +166,6 @@ const TeacherClasses = () => {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <CardTitle>{classItem.name}</CardTitle>
-                      <CardDescription className="mt-1">
-                        {classItem.description || "No description"}
-                      </CardDescription>
                     </div>
                     <Badge variant={classItem.is_active ? "default" : "secondary"}>
                       {classItem.is_active ? "Active" : "Inactive"}
