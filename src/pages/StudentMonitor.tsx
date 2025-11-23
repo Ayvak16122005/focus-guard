@@ -37,8 +37,11 @@ const StudentMonitor = () => {
   const [faceDetected, setFaceDetected] = useState(true);
   const [sessionTime, setSessionTime] = useState(0);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [notOnScreenTime, setNotOnScreenTime] = useState(0);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const alertSoundRef = useRef<HTMLAudioElement | null>(null);
   const previousStatusRef = useRef<"attentive" | "distracted" | "drowsy">("attentive");
+  const hasAlertedNotOnScreenRef = useRef(false);
 
   // Fetch student's enrolled classes
   const { data: enrolledClasses } = useQuery({
@@ -150,6 +153,56 @@ const StudentMonitor = () => {
     }
   }, [status, toast]);
 
+  // Track "not on screen" time (face not detected)
+  useEffect(() => {
+    if (!isMonitoring) return;
+
+    if (!faceDetected) {
+      const timer = setInterval(() => {
+        setNotOnScreenTime((prev) => {
+          const newTime = prev + 1;
+          
+          // Alert after 10 seconds of not being on screen
+          if (newTime === 10 && !hasAlertedNotOnScreenRef.current) {
+            hasAlertedNotOnScreenRef.current = true;
+            
+            // Play alert sound
+            alertSoundRef.current?.play().catch(console.error);
+            
+            // Show visual alert
+            toast({
+              title: "⚠️ Not On Screen",
+              description: "You haven't been detected for 10 seconds. Please face the camera. Your teacher has been notified.",
+              variant: "destructive",
+            });
+
+            // Insert alert into database
+            if (currentSessionId) {
+              supabase.auth.getUser().then(({ data: { user } }) => {
+                if (user) {
+                  supabase.from("alerts").insert({
+                    session_id: currentSessionId,
+                    student_id: user.id,
+                    alert_type: "not_on_screen",
+                    severity: "high",
+                    message: "Student not detected on screen for 10+ seconds",
+                  });
+                }
+              });
+            }
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    } else {
+      setNotOnScreenTime(0);
+      hasAlertedNotOnScreenRef.current = false;
+    }
+  }, [faceDetected, isMonitoring, currentSessionId, toast]);
+
   const startMonitoring = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -159,6 +212,24 @@ const StudentMonitor = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         setIsMonitoring(true);
+        
+        // Create monitoring session in database
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: session } = await supabase
+            .from("monitoring_sessions")
+            .insert({
+              student_id: user.id,
+              class_id: selectedClassId,
+              status: "active",
+            })
+            .select()
+            .single();
+          
+          if (session) {
+            setCurrentSessionId(session.id);
+          }
+        }
         
         toast({
           title: "Monitoring Started",
@@ -184,6 +255,23 @@ const StudentMonitor = () => {
       videoRef.current.srcObject = null;
     }
     setIsMonitoring(false);
+    setNotOnScreenTime(0);
+    hasAlertedNotOnScreenRef.current = false;
+    
+    // Update session in database
+    if (currentSessionId) {
+      supabase
+        .from("monitoring_sessions")
+        .update({
+          status: "ended",
+          ended_at: new Date().toISOString(),
+          total_duration_seconds: sessionTime,
+        })
+        .eq("id", currentSessionId);
+      
+      setCurrentSessionId(null);
+    }
+    
     toast({
       title: "Monitoring Stopped",
       description: "Session ended. Thank you for your participation!",
