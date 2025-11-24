@@ -136,19 +136,28 @@ export type Database = {
       classes: {
         Row: {
           created_at: string | null
+          description: string | null
           id: string
+          is_active: boolean | null
+          join_code: string | null
           name: string
           teacher_id: string
         }
         Insert: {
           created_at?: string | null
+          description?: string | null
           id?: string
+          is_active?: boolean | null
+          join_code?: string | null
           name: string
           teacher_id: string
         }
         Update: {
           created_at?: string | null
+          description?: string | null
           id?: string
+          is_active?: boolean | null
+          join_code?: string | null
           name?: string
           teacher_id?: string
         }
@@ -266,6 +275,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      generate_join_code: { Args: never; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
