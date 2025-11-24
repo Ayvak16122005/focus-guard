@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,43 +9,181 @@ import {
   TrendingUp,
   AlertTriangle,
   Eye,
-  BarChart3,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from "recharts";
-
-// Mock student data
-const students = [
-  { id: 1, name: "Alice Johnson", status: "focused", score: 95, distracted: 0 },
-  { id: 2, name: "Bob Smith", status: "distracted", score: 65, distracted: 45 },
-  { id: 3, name: "Carol White", status: "focused", score: 88, distracted: 0 },
-  { id: 4, name: "David Brown", status: "drowsy", score: 45, distracted: 120 },
-  { id: 5, name: "Eve Davis", status: "focused", score: 92, distracted: 0 },
-  { id: 6, name: "Frank Miller", status: "distracted", score: 58, distracted: 67 },
-  { id: 7, name: "Grace Lee", status: "focused", score: 97, distracted: 0 },
-  { id: 8, name: "Henry Wilson", status: "focused", score: 85, distracted: 12 },
-];
-
-const attentionTrendData = [
-  { time: "0m", avgScore: 95 },
-  { time: "5m", avgScore: 92 },
-  { time: "10m", avgScore: 88 },
-  { time: "15m", avgScore: 85 },
-  { time: "20m", avgScore: 78 },
-  { time: "25m", avgScore: 75 },
-  { time: "30m", avgScore: 72 },
-];
-
-const classComparisonData = [
-  { class: "Math 101", avgScore: 82 },
-  { class: "Physics 201", avgScore: 75 },
-  { class: "Chemistry 301", avgScore: 88 },
-  { class: "Biology 101", avgScore: 79 },
-];
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
 const TeacherDashboard = () => {
   const navigate = useNavigate();
-  const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
+  const { user } = useAuth();
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+
+  // Fetch teacher's classes
+  const { data: classes } = useQuery({
+    queryKey: ["teacher-classes", user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("classes")
+        .select("*")
+        .eq("teacher_id", user?.id);
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user?.id,
+  });
+
+  // Fetch active monitoring sessions for teacher's classes
+  const { data: activeSessions } = useQuery({
+    queryKey: ["active-sessions", classes],
+    queryFn: async () => {
+      if (!classes || classes.length === 0) return [];
+      
+      const classIds = classes.map(c => c.id);
+      const { data, error } = await supabase
+        .from("monitoring_sessions")
+        .select(`
+          *,
+          profiles:student_id (
+            id,
+            full_name
+          ),
+          classes (
+            name
+          )
+        `)
+        .in("class_id", classIds)
+        .eq("status", "active");
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!classes && classes.length > 0,
+  });
+
+  // Fetch latest attention metrics for active sessions
+  const { data: latestMetrics } = useQuery({
+    queryKey: ["latest-metrics", activeSessions],
+    queryFn: async () => {
+      if (!activeSessions || activeSessions.length === 0) return [];
+      
+      const sessionIds = activeSessions.map(s => s.id);
+      const { data, error } = await supabase
+        .from("attention_metrics")
+        .select("*")
+        .in("session_id", sessionIds)
+        .order("timestamp", { ascending: false });
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!activeSessions && activeSessions.length > 0,
+    refetchInterval: 5000, // Refetch every 5 seconds for real-time updates
+  });
+
+  // Fetch active alerts
+  const { data: activeAlerts } = useQuery({
+    queryKey: ["active-alerts", activeSessions],
+    queryFn: async () => {
+      if (!activeSessions || activeSessions.length === 0) return [];
+      
+      const sessionIds = activeSessions.map(s => s.id);
+      const { data, error } = await supabase
+        .from("alerts")
+        .select(`
+          *,
+          profiles:student_id (
+            full_name
+          )
+        `)
+        .in("session_id", sessionIds)
+        .eq("acknowledged", false)
+        .order("created_at", { ascending: false });
+      
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!activeSessions && activeSessions.length > 0,
+    refetchInterval: 5000,
+  });
+
+  // Process data for display
+  const studentsData = useMemo(() => {
+    if (!activeSessions || !latestMetrics) return [];
+
+    return activeSessions.map(session => {
+      const sessionMetrics = latestMetrics.filter(m => m.session_id === session.id);
+      const latestMetric = sessionMetrics[0];
+      
+      // Calculate average attention score for this session
+      const avgScore = sessionMetrics.length > 0
+        ? Math.round(sessionMetrics.reduce((sum, m) => sum + m.attention_score, 0) / sessionMetrics.length)
+        : 0;
+
+      return {
+        id: session.student_id,
+        name: session.profiles?.full_name || "Unknown Student",
+        status: latestMetric?.status || "focused",
+        score: avgScore,
+        distracted: session.total_distraction_time_seconds || 0,
+        className: session.classes?.name || "Unknown Class",
+      };
+    });
+  }, [activeSessions, latestMetrics]);
+
+  // Calculate class comparison data
+  const classComparisonData = useMemo(() => {
+    if (!classes || !activeSessions || !latestMetrics) return [];
+
+    return classes.map(cls => {
+      const classSessions = activeSessions.filter(s => s.class_id === cls.id);
+      const classMetrics = latestMetrics.filter(m => 
+        classSessions.some(s => s.id === m.session_id)
+      );
+
+      const avgScore = classMetrics.length > 0
+        ? Math.round(classMetrics.reduce((sum, m) => sum + m.attention_score, 0) / classMetrics.length)
+        : 0;
+
+      return {
+        class: cls.name,
+        avgScore,
+      };
+    }).filter(c => c.avgScore > 0);
+  }, [classes, activeSessions, latestMetrics]);
+
+  // Calculate attention trend data (last 30 minutes, grouped by 5-minute intervals)
+  const attentionTrendData = useMemo(() => {
+    if (!latestMetrics || latestMetrics.length === 0) return [];
+
+    const now = new Date();
+    const intervals = [];
+    
+    for (let i = 6; i >= 0; i--) {
+      const intervalEnd = new Date(now.getTime() - (i * 5 * 60 * 1000));
+      const intervalStart = new Date(intervalEnd.getTime() - (5 * 60 * 1000));
+      
+      const intervalMetrics = latestMetrics.filter(m => {
+        const metricTime = new Date(m.timestamp!);
+        return metricTime >= intervalStart && metricTime < intervalEnd;
+      });
+
+      if (intervalMetrics.length > 0) {
+        const avgScore = Math.round(
+          intervalMetrics.reduce((sum, m) => sum + m.attention_score, 0) / intervalMetrics.length
+        );
+        
+        intervals.push({
+          time: `${(6 - i) * 5}m`,
+          avgScore,
+        });
+      }
+    }
+
+    return intervals;
+  }, [latestMetrics]);
 
   const handleManageClasses = () => {
     navigate("/teacher/classes");
@@ -83,12 +221,12 @@ const TeacherDashboard = () => {
     }
   };
 
-  const focusedCount = students.filter((s) => s.status === "focused").length;
-  const distractedCount = students.filter((s) => s.status === "distracted").length;
-  const drowsyCount = students.filter((s) => s.status === "drowsy").length;
-  const avgScore = Math.round(
-    students.reduce((sum, s) => sum + s.score, 0) / students.length
-  );
+  const focusedCount = studentsData.filter((s) => s.status === "focused").length;
+  const distractedCount = studentsData.filter((s) => s.status === "distracted").length;
+  const drowsyCount = studentsData.filter((s) => s.status === "drowsy").length;
+  const avgScore = studentsData.length > 0
+    ? Math.round(studentsData.reduce((sum, s) => sum + s.score, 0) / studentsData.length)
+    : 0;
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -111,7 +249,7 @@ const TeacherDashboard = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Students</p>
-                <p className="text-3xl font-bold text-foreground">{students.length}</p>
+                <p className="text-3xl font-bold text-foreground">{studentsData.length}</p>
               </div>
               <Users className="h-8 w-8 text-primary" />
             </div>
@@ -161,10 +299,15 @@ const TeacherDashboard = () => {
           <TabsContent value="live" className="space-y-6">
             <Card className="p-6">
               <h2 className="mb-4 text-xl font-semibold text-foreground">
-                Student Grid View
+                Active Students
               </h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                {students.map((student) => (
+              {studentsData.length === 0 ? (
+                <p className="text-center text-muted-foreground py-8">
+                  No students are currently being monitored
+                </p>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  {studentsData.map((student) => (
                   <Card
                     key={student.id}
                     className={`cursor-pointer p-4 transition-all hover:shadow-medium ${
@@ -204,8 +347,9 @@ const TeacherDashboard = () => {
                       </p>
                     )}
                   </Card>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </Card>
 
             {/* Alerts Panel */}
@@ -217,27 +361,30 @@ const TeacherDashboard = () => {
                 </h2>
               </div>
               <div className="space-y-3">
-                {students
-                  .filter((s) => s.distracted >= 60)
-                  .map((student) => (
+                {activeAlerts && activeAlerts.length > 0 ? (
+                  activeAlerts.map((alert) => (
                     <div
-                      key={student.id}
+                      key={alert.id}
                       className="flex items-center justify-between rounded-lg bg-background p-4"
                     >
                       <div>
                         <p className="font-medium text-foreground">
-                          {student.name}
+                          {alert.profiles?.full_name || "Unknown Student"}
                         </p>
                         <p className="text-sm text-muted-foreground">
-                          Distracted for {student.distracted} seconds
+                          {alert.message}
                         </p>
                       </div>
-                      <Badge className="bg-destructive text-destructive-foreground">
-                        {student.status === "drowsy" ? "Drowsy" : "Distracted"}
+                      <Badge className={
+                        alert.severity === "high" 
+                          ? "bg-destructive text-destructive-foreground"
+                          : "bg-warning text-warning-foreground"
+                      }>
+                        {alert.alert_type}
                       </Badge>
                     </div>
-                  ))}
-                {students.filter((s) => s.distracted >= 60).length === 0 && (
+                  ))
+                ) : (
                   <p className="text-center text-sm text-muted-foreground">
                     No active alerts
                   </p>
@@ -250,26 +397,28 @@ const TeacherDashboard = () => {
           <TabsContent value="analytics" className="space-y-6">
             <Card className="p-6">
               <h2 className="mb-4 text-xl font-semibold text-foreground">
-                Attention Trend (Current Session)
+                Attention Trend (Last 30 Minutes)
               </h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={attentionTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis domain={[0, 100]} />
-                  <Tooltip />
-                  <Line
-                    type="monotone"
-                    dataKey="avgScore"
-                    stroke="hsl(var(--primary))"
-                    strokeWidth={2}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-              <p className="mt-4 text-sm text-muted-foreground">
-                Average attention decreases after 15-20 minutes. Consider taking a
-                short break or changing activity.
-              </p>
+              {attentionTrendData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={attentionTrendData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="time" />
+                    <YAxis domain={[0, 100]} />
+                    <Tooltip />
+                    <Line
+                      type="monotone"
+                      dataKey="avgScore"
+                      stroke="hsl(var(--primary))"
+                      strokeWidth={2}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-center text-muted-foreground py-12">
+                  No attention data available yet
+                </p>
+              )}
             </Card>
 
             <div className="grid gap-6 md:grid-cols-2">
@@ -278,22 +427,28 @@ const TeacherDashboard = () => {
                   High Performers
                 </h3>
                 <div className="space-y-3">
-                  {students
-                    .sort((a, b) => b.score - a.score)
-                    .slice(0, 3)
-                    .map((student) => (
-                      <div
-                        key={student.id}
-                        className="flex items-center justify-between"
-                      >
-                        <span className="text-sm text-foreground">
-                          {student.name}
-                        </span>
-                        <Badge className="bg-success text-success-foreground">
-                          {student.score}%
-                        </Badge>
-                      </div>
-                    ))}
+                  {studentsData.length > 0 ? (
+                    studentsData
+                      .sort((a, b) => b.score - a.score)
+                      .slice(0, 3)
+                      .map((student) => (
+                        <div
+                          key={student.id}
+                          className="flex items-center justify-between"
+                        >
+                          <span className="text-sm text-foreground">
+                            {student.name}
+                          </span>
+                          <Badge className="bg-success text-success-foreground">
+                            {student.score}%
+                          </Badge>
+                        </div>
+                      ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center">
+                      No data available
+                    </p>
+                  )}
                 </div>
               </Card>
 
@@ -302,22 +457,28 @@ const TeacherDashboard = () => {
                   Needs Support
                 </h3>
                 <div className="space-y-3">
-                  {students
-                    .sort((a, b) => a.score - b.score)
-                    .slice(0, 3)
-                    .map((student) => (
-                      <div
-                        key={student.id}
-                        className="flex items-center justify-between"
-                      >
-                        <span className="text-sm text-foreground">
-                          {student.name}
-                        </span>
-                        <Badge className="bg-destructive text-destructive-foreground">
-                          {student.score}%
-                        </Badge>
-                      </div>
-                    ))}
+                  {studentsData.length > 0 ? (
+                    studentsData
+                      .sort((a, b) => a.score - b.score)
+                      .slice(0, 3)
+                      .map((student) => (
+                        <div
+                          key={student.id}
+                          className="flex items-center justify-between"
+                        >
+                          <span className="text-sm text-foreground">
+                            {student.name}
+                          </span>
+                          <Badge className="bg-destructive text-destructive-foreground">
+                            {student.score}%
+                          </Badge>
+                        </div>
+                      ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground text-center">
+                      No data available
+                    </p>
+                  )}
                 </div>
               </Card>
             </div>
@@ -329,50 +490,62 @@ const TeacherDashboard = () => {
               <h2 className="mb-4 text-xl font-semibold text-foreground">
                 Engagement Across Classes
               </h2>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={classComparisonData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="class" />
-                  <YAxis domain={[0, 100]} />
-                  <Tooltip />
-                  <Bar dataKey="avgScore" fill="hsl(var(--primary))" />
-                </BarChart>
-              </ResponsiveContainer>
-              <p className="mt-4 text-sm text-muted-foreground">
-                Chemistry 301 shows the highest engagement. Consider reviewing
-                teaching strategies from this class.
-              </p>
+              {classComparisonData.length > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={classComparisonData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="class" />
+                      <YAxis domain={[0, 100]} />
+                      <Tooltip />
+                      <Bar dataKey="avgScore" fill="hsl(var(--primary))" />
+                    </BarChart>
+                  </ResponsiveContainer>
+
+                  <div className="grid gap-6 md:grid-cols-2 mt-6">
+                    <Card className="p-6">
+                      <h3 className="mb-4 text-lg font-semibold text-foreground">
+                        Best Performing Class
+                      </h3>
+                      <div className="text-center">
+                        {classComparisonData.length > 0 && (
+                          <>
+                            <p className="mb-2 text-3xl font-bold text-success">
+                              {classComparisonData.sort((a, b) => b.avgScore - a.avgScore)[0].class}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {classComparisonData.sort((a, b) => b.avgScore - a.avgScore)[0].avgScore}% average attention score
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </Card>
+
+                    <Card className="p-6">
+                      <h3 className="mb-4 text-lg font-semibold text-foreground">
+                        Needs Improvement
+                      </h3>
+                      <div className="text-center">
+                        {classComparisonData.length > 0 && (
+                          <>
+                            <p className="mb-2 text-3xl font-bold text-warning">
+                              {classComparisonData.sort((a, b) => a.avgScore - b.avgScore)[0].class}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {classComparisonData.sort((a, b) => a.avgScore - b.avgScore)[0].avgScore}% average attention score
+                            </p>
+                          </>
+                        )}
+                      </div>
+                    </Card>
+                  </div>
+                </>
+              ) : (
+                <p className="text-center text-muted-foreground py-12">
+                  No class comparison data available yet
+                </p>
+              )}
             </Card>
-
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card className="p-6">
-                <h3 className="mb-4 text-lg font-semibold text-foreground">
-                  Best Performing Class
-                </h3>
-                <div className="text-center">
-                  <p className="mb-2 text-3xl font-bold text-success">
-                    Chemistry 301
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    88% average attention score
-                  </p>
-                </div>
-              </Card>
-
-              <Card className="p-6">
-                <h3 className="mb-4 text-lg font-semibold text-foreground">
-                  Needs Improvement
-                </h3>
-                <div className="text-center">
-                  <p className="mb-2 text-3xl font-bold text-warning">
-                    Physics 201
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    75% average attention score
-                  </p>
-                </div>
-              </Card>
-            </div>
           </TabsContent>
         </Tabs>
       </div>
