@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import {
   Eye,
   EyeOff,
@@ -62,6 +64,13 @@ const StudentMonitor = () => {
       return data?.map(item => item.classes).filter(Boolean) || [];
     },
   });
+
+  // Auto-select first class if only one is available
+  useEffect(() => {
+    if (enrolledClasses && enrolledClasses.length === 1 && !selectedClassId) {
+      setSelectedClassId(enrolledClasses[0].id);
+    }
+  }, [enrolledClasses, selectedClassId]);
 
   // Track tab visibility
   useEffect(() => {
@@ -379,16 +388,48 @@ const StudentMonitor = () => {
               )}
             </div>
 
+            {!isMonitoring && enrolledClasses && enrolledClasses.length > 0 && (
+              <div className="mt-4 space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="class-select">Select Class</Label>
+                  <Select value={selectedClassId || ""} onValueChange={setSelectedClassId}>
+                    <SelectTrigger id="class-select">
+                      <SelectValue placeholder="Choose a class to monitor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {enrolledClasses.map((classItem: any) => (
+                        <SelectItem key={classItem.id} value={classItem.id}>
+                          {classItem.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 flex justify-center">
               {!isMonitoring ? (
-                <Button
-                  size="lg"
-                  onClick={startMonitoring}
-                  className="bg-gradient-primary text-white"
-                >
-                  <Video className="mr-2 h-5 w-5" />
-                  Start Monitoring
-                </Button>
+                <>
+                  {enrolledClasses && enrolledClasses.length === 0 ? (
+                    <div className="text-center">
+                      <p className="text-muted-foreground mb-4">You haven't joined any classes yet.</p>
+                      <Button onClick={() => navigate("/join")}>
+                        Join a Class
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="lg"
+                      onClick={startMonitoring}
+                      disabled={!selectedClassId}
+                      className="bg-gradient-primary text-white"
+                    >
+                      <Video className="mr-2 h-5 w-5" />
+                      Start Monitoring
+                    </Button>
+                  )}
+                </>
               ) : (
                 <Button size="lg" variant="destructive" onClick={stopMonitoring}>
                   <VideoOff className="mr-2 h-5 w-5" />
