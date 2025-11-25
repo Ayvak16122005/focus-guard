@@ -301,15 +301,30 @@ const TeacherClassMonitor = () => {
                     </div>
                   ) : (
                     studentStatuses.map((student) => (
-                      <Card key={student.student_id}>
+                      <Card 
+                        key={student.student_id}
+                        className={!student.face_detected ? "border-destructive bg-destructive/5" : ""}
+                      >
                         <CardContent className="pt-6">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                              {getStatusIcon(student)}
+                              <div className={!student.face_detected ? "text-destructive" : ""}>
+                                {getStatusIcon(student)}
+                              </div>
                               <div>
-                                <div className="font-semibold">{student.student_name}</div>
+                                <div className="font-semibold flex items-center gap-2">
+                                  {student.student_name}
+                                  {!student.face_detected && (
+                                    <Badge variant="destructive" className="text-xs">
+                                      NOT LIVE
+                                    </Badge>
+                                  )}
+                                </div>
                                 <div className="text-sm text-muted-foreground">
                                   Attention: {student.attention_score}%
+                                  {!student.face_detected && (
+                                    <span className="text-destructive ml-2">● Not on camera</span>
+                                  )}
                                 </div>
                               </div>
                             </div>
