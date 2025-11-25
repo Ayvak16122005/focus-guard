@@ -85,11 +85,27 @@ export const detectFaceAndAttention = async (
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
 
+    // More strict face detection - no face detected
     if (faces.length === 0) {
-      return { faceDetected: false, status: "distracted", attentionScore: 30 };
+      return { faceDetected: false, status: "distracted", attentionScore: 0 };
     }
 
+    // Check if face is too far from center or too small (person moved away)
     const face = faces[0];
+    const box = face.box;
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+    
+    // Calculate face size relative to video
+    const faceArea = box.width * box.height;
+    const videoArea = videoWidth * videoHeight;
+    const faceRatio = faceArea / videoArea;
+    
+    // Face is too small (person is too far) - consider as not present
+    if (faceRatio < 0.015) {
+      return { faceDetected: false, status: "distracted", attentionScore: 10 };
+    }
+
     const landmarks = face.keypoints;
 
     // Draw face mesh for visualization

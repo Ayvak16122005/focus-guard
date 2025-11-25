@@ -296,6 +296,16 @@ const StudentMonitor = () => {
     setStatus(result.status);
     setAttentionScore(result.attentionScore);
 
+    // Log metrics to database every 3 seconds
+    if (currentSessionId && Math.floor(sessionTime) % 3 === 0) {
+      supabase.from("attention_metrics").insert({
+        session_id: currentSessionId,
+        face_detected: result.faceDetected,
+        status: result.status === "attentive" ? "focused" : result.status,
+        attention_score: result.attentionScore,
+      });
+    }
+
     requestAnimationFrame(detectLoop);
   };
 
@@ -377,6 +387,28 @@ const StudentMonitor = () => {
                 ref={canvasRef}
                 className="absolute top-0 left-0 h-full w-full"
               />
+              
+              {/* Live Status Indicator */}
+              {isMonitoring && (
+                <div className="absolute top-4 left-4">
+                  <Badge 
+                    variant={faceDetected ? "default" : "destructive"}
+                    className="text-base px-4 py-2"
+                  >
+                    {faceDetected ? (
+                      <>
+                        <Eye className="mr-2 h-4 w-4" />
+                        LIVE - You are visible
+                      </>
+                    ) : (
+                      <>
+                        <EyeOff className="mr-2 h-4 w-4" />
+                        NOT DETECTED - Face the camera!
+                      </>
+                    )}
+                  </Badge>
+                </div>
+              )}
               
               {!isMonitoring && (
                 <div className="absolute inset-0 flex items-center justify-center bg-muted">
