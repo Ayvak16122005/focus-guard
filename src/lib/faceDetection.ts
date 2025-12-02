@@ -3,6 +3,16 @@ import * as faceLandmarksDetection from "@tensorflow-models/face-landmarks-detec
 
 let detector: faceLandmarksDetection.FaceLandmarksDetector | null = null;
 
+// Temporal tracking for more accurate sleep detection
+const EAR_HISTORY_SIZE = 15; // Track last 15 frames (~0.5 seconds at 30fps)
+const CONSECUTIVE_DROWSY_THRESHOLD = 10; // Need 10 consecutive low EAR frames
+const CONSECUTIVE_SLEEP_THRESHOLD = 12; // Need 12 consecutive very low EAR frames
+
+let earHistory: number[] = [];
+let consecutiveDrowsyFrames = 0;
+let consecutiveSleepFrames = 0;
+let consecutiveNoFaceFrames = 0;
+
 export const initFaceDetection = async () => {
   if (detector) return detector;
 
@@ -87,6 +97,11 @@ export const detectFaceAndAttention = async (
 
     // More strict face detection - no face detected
     if (faces.length === 0) {
+      consecutiveNoFaceFrames++;
+      // Reset EAR tracking when face not detected
+      earHistory = [];
+      consecutiveDrowsyFrames = 0;
+      consecutiveSleepFrames = 0;
       return { faceDetected: false, status: "distracted", attentionScore: 0 };
     }
 
@@ -134,23 +149,50 @@ export const detectFaceAndAttention = async (
     let status: "attentive" | "distracted" | "drowsy" = "attentive";
     let attentionScore = 100;
 
-    // More sensitive EAR thresholds for better drowsiness/sleep detection
-    const EAR_SLEEP_THRESHOLD = 0.15; // Eyes fully or nearly closed (sleeping)
-    const EAR_DROWSY_THRESHOLD = 0.20; // Eyes drooping (drowsy)
+    // Enhanced EAR thresholds with temporal tracking
+    const EAR_SLEEP_THRESHOLD = 0.16; // Eyes fully or nearly closed (sleeping)
+    const EAR_DROWSY_THRESHOLD = 0.21; // Eyes drooping (drowsy)
+    const EAR_BLINK_THRESHOLD = 0.18; // Normal blink threshold
     
     // Head pose thresholds (normalized values)
     const HORIZONTAL_THRESHOLD = 0.05;
     const VERTICAL_THRESHOLD = 0.08;
 
-    // Priority 1: Check for sleeping (eyes fully closed)
-    if (avgEAR < EAR_SLEEP_THRESHOLD) {
-      status = "drowsy";
-      attentionScore = 20; // Very low score for sleeping
+    // Add current EAR to history
+    earHistory.push(avgEAR);
+    if (earHistory.length > EAR_HISTORY_SIZE) {
+      earHistory.shift();
     }
-    // Priority 2: Check for drowsiness (eyes drooping)
-    else if (avgEAR < EAR_DROWSY_THRESHOLD) {
+
+    // Calculate average EAR over recent frames to filter out blinks
+    const recentAvgEAR = earHistory.length > 0 
+      ? earHistory.reduce((a, b) => a + b, 0) / earHistory.length 
+      : avgEAR;
+
+    // Track consecutive frames with low EAR (not just single frame detection)
+    if (avgEAR < EAR_SLEEP_THRESHOLD) {
+      consecutiveSleepFrames++;
+      consecutiveDrowsyFrames++;
+    } else if (avgEAR < EAR_DROWSY_THRESHOLD) {
+      consecutiveSleepFrames = 0;
+      consecutiveDrowsyFrames++;
+    } else {
+      consecutiveSleepFrames = 0;
+      consecutiveDrowsyFrames = 0;
+    }
+
+    // Reset no-face counter when face is found
+    consecutiveNoFaceFrames = 0;
+
+    // Priority 1: SLEEPING - Need sustained closed eyes (not just a blink)
+    if (consecutiveSleepFrames >= CONSECUTIVE_SLEEP_THRESHOLD || recentAvgEAR < EAR_SLEEP_THRESHOLD) {
       status = "drowsy";
-      attentionScore = 40;
+      attentionScore = 10; // Very low score for sleeping
+    }
+    // Priority 2: DROWSY - Sustained droopy eyes
+    else if (consecutiveDrowsyFrames >= CONSECUTIVE_DROWSY_THRESHOLD || recentAvgEAR < EAR_DROWSY_THRESHOLD) {
+      status = "drowsy";
+      attentionScore = 30;
     }
     // Priority 3: Check for head pose distraction
     else if (

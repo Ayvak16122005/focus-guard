@@ -102,7 +102,7 @@ const StudentMonitor = () => {
     return () => clearInterval(timer);
   }, [isMonitoring]);
 
-  // Immediate alert system for status changes
+  // Immediate alert system for status changes with database notification
   useEffect(() => {
     if (previousStatusRef.current !== status) {
       if (status === "distracted") {
@@ -116,15 +116,31 @@ const StudentMonitor = () => {
           variant: "destructive",
         });
       } else if (status === "drowsy") {
-        // Play alert sound
+        // Play alert sound multiple times for sleep detection
         alertSoundRef.current?.play().catch(console.error);
+        setTimeout(() => alertSoundRef.current?.play().catch(console.error), 500);
         
         // Show visual alert
         toast({
-          title: "😴 Drowsiness Alert",
-          description: "You appear drowsy. Please stay alert and focused!",
+          title: "😴 SLEEPING DETECTED!",
+          description: "Wake up! You appear to be sleeping. Your teacher has been notified!",
           variant: "destructive",
         });
+
+        // Send alert to database immediately for teacher notification
+        if (currentSessionId) {
+          supabase.auth.getUser().then(({ data: { user } }) => {
+            if (user) {
+              supabase.from("alerts").insert({
+                session_id: currentSessionId,
+                student_id: user.id,
+                alert_type: "drowsy",
+                severity: "high",
+                message: "Student detected sleeping/drowsy - eyes closed for extended period",
+              });
+            }
+          });
+        }
       } else if (status === "attentive" && previousStatusRef.current !== "attentive") {
         // Student returned to being attentive
         toast({
@@ -135,7 +151,7 @@ const StudentMonitor = () => {
       
       previousStatusRef.current = status;
     }
-  }, [status, toast]);
+  }, [status, toast, currentSessionId]);
 
   // Distraction timer and extended alerts
   useEffect(() => {
