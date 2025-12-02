@@ -16,9 +16,13 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { detectFaceAndAttention } from "@/lib/faceDetection";
+import { detectFaceAndAttention, resetDetection, AlertType } from "@/lib/faceDetection";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+
+// Track last alert time per type to prevent spam
+const lastAlertTime: Record<string, number> = {};
+const ALERT_COOLDOWN_MS = 30000; // 30 seconds between same alert types
 
 const StudentMonitor = () => {
   const navigate = useNavigate();
@@ -230,6 +234,9 @@ const StudentMonitor = () => {
 
   const startMonitoring = async () => {
     try {
+      // Reset detection state for new session
+      resetDetection();
+      
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 480 },
       });
@@ -312,6 +319,33 @@ const StudentMonitor = () => {
     setStatus(result.status);
     setAttentionScore(result.attentionScore);
 
+    // Handle alerts from the detection system
+    if (result.alerts && result.alerts.length > 0 && currentSessionId) {
+      const now = Date.now();
+      for (const alertType of result.alerts) {
+        // Check cooldown to prevent alert spam
+        if (lastAlertTime[alertType] && now - lastAlertTime[alertType] < ALERT_COOLDOWN_MS) {
+          continue;
+        }
+        
+        if (alertType === "drowsy" || alertType === "yawning" || alertType === "not_on_screen" || alertType === "prolonged_inattention") {
+          lastAlertTime[alertType] = now;
+          
+          supabase.auth.getUser().then(({ data: { user } }) => {
+            if (user) {
+              supabase.from("alerts").insert({
+                session_id: currentSessionId,
+                student_id: user.id,
+                alert_type: alertType,
+                severity: alertType === "drowsy" || alertType === "prolonged_inattention" ? "high" : "medium",
+                message: getAlertMessage(alertType),
+              });
+            }
+          });
+        }
+      }
+    }
+
     // Log metrics to database every 3 seconds
     if (currentSessionId && Math.floor(sessionTime) % 3 === 0) {
       supabase.from("attention_metrics").insert({
@@ -323,6 +357,23 @@ const StudentMonitor = () => {
     }
 
     requestAnimationFrame(detectLoop);
+  };
+
+  const getAlertMessage = (alertType: AlertType): string => {
+    switch (alertType) {
+      case "drowsy":
+        return "Student detected sleeping/drowsy - eyes closed for extended period";
+      case "yawning":
+        return "Student detected yawning - possible fatigue";
+      case "not_on_screen":
+        return "Student not detected on screen for extended period";
+      case "looking_away":
+        return "Student looking away from screen";
+      case "prolonged_inattention":
+        return "Student has been inattentive for over 60 seconds";
+      default:
+        return "Attention alert detected";
+    }
   };
 
   const formatTime = (seconds: number) => {

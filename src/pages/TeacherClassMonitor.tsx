@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Bell, Eye, EyeOff, Moon, AlertCircle } from "lucide-react";
+import { ArrowLeft, Bell, Eye, EyeOff, Moon, AlertCircle, Mic } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface StudentStatus {
@@ -217,6 +217,23 @@ const TeacherClassMonitor = () => {
     }
   };
 
+  const getAlertTypeBadge = (alertType: string) => {
+    switch (alertType) {
+      case "drowsy":
+        return <Badge variant="destructive">😴 Sleeping</Badge>;
+      case "yawning":
+        return <Badge className="bg-warning text-warning-foreground">🥱 Yawning</Badge>;
+      case "not_on_screen":
+        return <Badge variant="destructive">👤 Not Visible</Badge>;
+      case "looking_away":
+        return <Badge variant="secondary">👀 Looking Away</Badge>;
+      case "prolonged_inattention":
+        return <Badge variant="destructive">⏰ Extended Inattention</Badge>;
+      default:
+        return <Badge variant="secondary">{alertType}</Badge>;
+    }
+  };
+
   const stats = {
     total: studentStatuses.length,
     attentive: studentStatuses.filter((s) => s.status === "attentive" && s.face_detected).length,
@@ -359,10 +376,13 @@ const TeacherClassMonitor = () => {
                       <Card key={alert.id} className="bg-destructive/10">
                         <CardContent className="pt-4">
                           <div className="text-sm">
-                            <div className="font-semibold mb-1">
-                              {alert.monitoring_sessions?.profiles?.full_name || "Unknown"}
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="font-semibold">
+                                {alert.monitoring_sessions?.profiles?.full_name || "Unknown"}
+                              </span>
+                              {getAlertTypeBadge(alert.alert_type)}
                             </div>
-                            <div className="text-muted-foreground">{alert.message}</div>
+                            <div className="text-muted-foreground text-xs">{alert.message}</div>
                             <div className="text-xs text-muted-foreground mt-2">
                               {new Date(alert.created_at).toLocaleTimeString()}
                             </div>
