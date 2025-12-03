@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Bell, Eye, EyeOff, Moon, AlertCircle, Mic } from "lucide-react";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ArrowLeft, Users, MessageSquare, Send } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import LiveSessionControls from "@/components/teacher/LiveSessionControls";
+import StudentGrid from "@/components/teacher/StudentGrid";
+import AlertsPanel from "@/components/teacher/AlertsPanel";
+import ClassStatsBar from "@/components/teacher/ClassStatsBar";
 
 interface StudentStatus {
   student_id: string;
@@ -23,8 +27,11 @@ const TeacherClassMonitor = () => {
   const { classId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [studentStatuses, setStudentStatuses] = useState<StudentStatus[]>([]);
   const [alerts, setAlerts] = useState<any[]>([]);
+  const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
+  const [broadcastMessage, setBroadcastMessage] = useState("");
   const alertSoundRef = useState(() => new Audio("/alert-sound.mp3"))[0];
 
   // Fetch class details
@@ -42,7 +49,7 @@ const TeacherClassMonitor = () => {
     },
   });
 
-  // Fetch active monitoring sessions and student info
+  // Fetch active monitoring sessions
   const { data: sessions } = useQuery({
     queryKey: ["class-sessions", classId],
     queryFn: async () => {
@@ -58,8 +65,48 @@ const TeacherClassMonitor = () => {
       if (error) throw error;
       return data;
     },
-    refetchInterval: 5000, // Refresh every 5 seconds
+    refetchInterval: 5000,
   });
+
+  // Acknowledge alert mutation
+  const acknowledgeAlertMutation = useMutation({
+    mutationFn: async (alertId: string) => {
+      const { error } = await supabase
+        .from("alerts")
+        .update({ acknowledged: true })
+        .eq("id", alertId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      fetchAlerts();
+      toast({ title: "Alert acknowledged" });
+    },
+  });
+
+  // Fetch alerts
+  const fetchAlerts = async () => {
+    if (!classId) return;
+    
+    const { data } = await supabase
+      .from("alerts")
+      .select(`
+        *,
+        monitoring_sessions!alerts_session_id_fkey(
+          class_id,
+          profiles!monitoring_sessions_student_id_fkey(full_name)
+        )
+      `)
+      .eq("acknowledged", false)
+      .order("created_at", { ascending: false })
+      .limit(20);
+
+    if (data) {
+      const classAlerts = data.filter(
+        (alert) => alert.monitoring_sessions?.class_id === classId
+      );
+      setAlerts(classAlerts);
+    }
+  };
 
   // Subscribe to real-time attention metrics
   useEffect(() => {
@@ -76,8 +123,7 @@ const TeacherClassMonitor = () => {
         },
         async (payload) => {
           const metric = payload.new;
-          
-          // Get session details
+
           const { data: session } = await supabase
             .from("monitoring_sessions")
             .select(`
@@ -102,15 +148,11 @@ const TeacherClassMonitor = () => {
               };
 
               if (existing) {
-                // Check if status worsened (attentive -> distracted/drowsy)
                 if (
                   existing.status === "attentive" &&
                   (newStatus.status === "distracted" || newStatus.status === "drowsy")
                 ) {
-                  // Play alert sound
                   alertSoundRef.play().catch(console.error);
-                  
-                  // Show notification
                   toast({
                     title: `⚠️ ${newStatus.student_name}`,
                     description: `Student is now ${newStatus.status}`,
@@ -139,23 +181,6 @@ const TeacherClassMonitor = () => {
   useEffect(() => {
     if (!classId) return;
 
-    const fetchAlerts = async () => {
-      const { data } = await supabase
-        .from("alerts")
-        .select(`
-          *,
-          monitoring_sessions!alerts_session_id_fkey(
-            profiles!monitoring_sessions_student_id_fkey(full_name)
-          )
-        `)
-        .eq("monitoring_sessions.class_id", classId)
-        .eq("acknowledged", false)
-        .order("created_at", { ascending: false })
-        .limit(10);
-
-      if (data) setAlerts(data);
-    };
-
     fetchAlerts();
 
     const channel = supabase
@@ -168,16 +193,11 @@ const TeacherClassMonitor = () => {
           table: "alerts",
         },
         (payload) => {
-          const alert = payload.new;
-          
-          // Play sound for new alert
           alertSoundRef.play().catch(console.error);
-          
           fetchAlerts();
-          
           toast({
             title: "🔔 New Alert",
-            description: alert.message,
+            description: payload.new.message,
             variant: "destructive",
           });
         }
@@ -189,49 +209,14 @@ const TeacherClassMonitor = () => {
     };
   }, [classId, toast, alertSoundRef]);
 
-  const getStatusIcon = (student: StudentStatus) => {
-    if (!student.face_detected) {
-      return <EyeOff className="h-4 w-4" />;
-    }
-    if (student.status === "drowsy") {
-      return <Moon className="h-4 w-4" />;
-    }
-    if (student.status === "distracted") {
-      return <AlertCircle className="h-4 w-4" />;
-    }
-    return <Eye className="h-4 w-4" />;
-  };
-
-  const getStatusBadge = (student: StudentStatus) => {
-    if (!student.face_detected) {
-      return <Badge variant="destructive">Not on Screen</Badge>;
-    }
+  const handleBroadcastMessage = () => {
+    if (!broadcastMessage.trim()) return;
     
-    switch (student.status) {
-      case "attentive":
-        return <Badge className="bg-success">Attentive</Badge>;
-      case "distracted":
-        return <Badge variant="secondary">Distracted</Badge>;
-      case "drowsy":
-        return <Badge variant="destructive">Drowsy</Badge>;
-    }
-  };
-
-  const getAlertTypeBadge = (alertType: string) => {
-    switch (alertType) {
-      case "drowsy":
-        return <Badge variant="destructive">😴 Sleeping</Badge>;
-      case "yawning":
-        return <Badge className="bg-warning text-warning-foreground">🥱 Yawning</Badge>;
-      case "not_on_screen":
-        return <Badge variant="destructive">👤 Not Visible</Badge>;
-      case "looking_away":
-        return <Badge variant="secondary">👀 Looking Away</Badge>;
-      case "prolonged_inattention":
-        return <Badge variant="destructive">⏰ Extended Inattention</Badge>;
-      default:
-        return <Badge variant="secondary">{alertType}</Badge>;
-    }
+    toast({
+      title: "📢 Message Broadcast",
+      description: `"${broadcastMessage}" sent to all students`,
+    });
+    setBroadcastMessage("");
   };
 
   const stats = {
@@ -243,159 +228,132 @@ const TeacherClassMonitor = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => navigate("/teacher/classes")}
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-3xl font-bold">{classData?.name || "Class Monitor"}</h1>
-            <p className="text-muted-foreground">Real-time student monitoring</p>
+    <div className="min-h-screen bg-background p-4 md:p-6">
+      <div className="max-w-7xl mx-auto space-y-4">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate("/teacher/classes")}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-bold">{classData?.name || "Class Monitor"}</h1>
+              <p className="text-muted-foreground text-sm">Real-time student monitoring</p>
+            </div>
           </div>
         </div>
 
-        {/* Statistics */}
-        <div className="grid gap-4 md:grid-cols-5">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium">Total Students</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.total}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-success">Attentive</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.attentive}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-warning">Distracted</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.distracted}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-destructive">Drowsy</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.drowsy}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Not on Screen</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.notOnScreen}</div>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Live Session Controls */}
+        <LiveSessionControls
+          classId={classId || ""}
+          className={classData?.name || "Class"}
+          studentCount={stats.total}
+        />
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Student List */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Active Students</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[500px]">
-                <div className="space-y-3">
-                  {studentStatuses.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No active students yet
-                    </div>
-                  ) : (
-                    studentStatuses.map((student) => (
-                      <Card 
-                        key={student.student_id}
-                        className={!student.face_detected ? "border-destructive bg-destructive/5" : ""}
+        {/* Stats Bar */}
+        <ClassStatsBar {...stats} />
+
+        {/* Main Content Tabs */}
+        <Tabs defaultValue="students" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="students" className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              Students
+            </TabsTrigger>
+            <TabsTrigger value="alerts" className="flex items-center gap-2">
+              🔔 Alerts
+              {alerts.length > 0 && (
+                <span className="bg-destructive text-destructive-foreground text-xs px-1.5 py-0.5 rounded-full">
+                  {alerts.length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="broadcast" className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4" />
+              Broadcast
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="students">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Active Students ({stats.total})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <StudentGrid
+                  students={studentStatuses}
+                  onStudentClick={setSelectedStudent}
+                  selectedStudentId={selectedStudent}
+                />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="alerts">
+            <AlertsPanel
+              alerts={alerts}
+              onAcknowledge={(id) => acknowledgeAlertMutation.mutate(id)}
+              onPlaySound={() => alertSoundRef.play().catch(console.error)}
+            />
+          </TabsContent>
+
+          <TabsContent value="broadcast">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  Broadcast Message
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Send a message to all students in this class.
+                </p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Type your message to all students..."
+                    value={broadcastMessage}
+                    onChange={(e) => setBroadcastMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleBroadcastMessage()}
+                  />
+                  <Button onClick={handleBroadcastMessage} disabled={!broadcastMessage.trim()}>
+                    <Send className="h-4 w-4 mr-2" />
+                    Send
+                  </Button>
+                </div>
+                
+                <div>
+                  <p className="text-sm font-medium mb-2">Quick Messages:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "Please pay attention!",
+                      "Turn on your cameras",
+                      "Class ending in 5 minutes",
+                      "Any questions?",
+                      "Take a short break",
+                    ].map((msg) => (
+                      <Button
+                        key={msg}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setBroadcastMessage(msg)}
                       >
-                        <CardContent className="pt-6">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className={!student.face_detected ? "text-destructive" : ""}>
-                                {getStatusIcon(student)}
-                              </div>
-                              <div>
-                                <div className="font-semibold flex items-center gap-2">
-                                  {student.student_name}
-                                  {!student.face_detected && (
-                                    <Badge variant="destructive" className="text-xs">
-                                      NOT LIVE
-                                    </Badge>
-                                  )}
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                  Attention: {student.attention_score}%
-                                  {!student.face_detected && (
-                                    <span className="text-destructive ml-2">● Not on camera</span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                            {getStatusBadge(student)}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
-                  )}
+                        {msg}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Alerts Panel */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bell className="h-4 w-4" />
-                Recent Alerts
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[500px]">
-                <div className="space-y-3">
-                  {alerts.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground text-sm">
-                      No alerts yet
-                    </div>
-                  ) : (
-                    alerts.map((alert) => (
-                      <Card key={alert.id} className="bg-destructive/10">
-                        <CardContent className="pt-4">
-                          <div className="text-sm">
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="font-semibold">
-                                {alert.monitoring_sessions?.profiles?.full_name || "Unknown"}
-                              </span>
-                              {getAlertTypeBadge(alert.alert_type)}
-                            </div>
-                            <div className="text-muted-foreground text-xs">{alert.message}</div>
-                            <div className="text-xs text-muted-foreground mt-2">
-                              {new Date(alert.created_at).toLocaleTimeString()}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
