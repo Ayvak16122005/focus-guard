@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Users, MessageSquare, Send } from "lucide-react";
+import { ArrowLeft, Users, MessageSquare, Send, Share2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import LiveSessionControls from "@/components/teacher/LiveSessionControls";
 import StudentGrid from "@/components/teacher/StudentGrid";
 import AlertsPanel from "@/components/teacher/AlertsPanel";
 import ClassStatsBar from "@/components/teacher/ClassStatsBar";
+import ShareClassLink from "@/components/teacher/ShareClassLink";
 
 interface StudentStatus {
   student_id: string;
@@ -259,7 +260,7 @@ const TeacherClassMonitor = () => {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="students" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="students" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
               Students
@@ -271,6 +272,10 @@ const TeacherClassMonitor = () => {
                   {alerts.length}
                 </span>
               )}
+            </TabsTrigger>
+            <TabsTrigger value="invite" className="flex items-center gap-2">
+              <Share2 className="h-4 w-4" />
+              Invite
             </TabsTrigger>
             <TabsTrigger value="broadcast" className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4" />
@@ -302,6 +307,16 @@ const TeacherClassMonitor = () => {
               onAcknowledge={(id) => acknowledgeAlertMutation.mutate(id)}
               onPlaySound={() => alertSoundRef.play().catch(console.error)}
             />
+          </TabsContent>
+
+          <TabsContent value="invite">
+            {classData && (
+              <ShareClassLink
+                joinCode={classData.join_code || ""}
+                className={classData.name}
+                studentCount={stats.total}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="broadcast">
