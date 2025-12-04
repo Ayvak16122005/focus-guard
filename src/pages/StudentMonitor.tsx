@@ -15,26 +15,27 @@ import {
   VideoOff,
   ArrowLeft,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { detectFaceAndAttention, resetDetection, AlertType } from "@/lib/faceDetection";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import TeacherStream from "@/components/student/TeacherStream";
+import BroadcastMessages from "@/components/student/BroadcastMessages";
 
 // Track last alert time per type to prevent spam
 const lastAlertTime: Record<string, number> = {};
 const ALERT_COOLDOWN_MS = 30000; // 30 seconds between same alert types
+const DISTRACTION_ALERT_THRESHOLD = 20; // Alert teacher after 20 seconds
 
 const StudentMonitor = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
   
-  // Initialize alert sound
-  useEffect(() => {
-    alertSoundRef.current = new Audio("/alert-sound.mp3");
-    alertSoundRef.current.volume = 0.5;
-  }, []);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const alertSoundRef = useRef<HTMLAudioElement | null>(null);
+  
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [attentionScore, setAttentionScore] = useState(100);
   const [status, setStatus] = useState<"attentive" | "distracted" | "drowsy">("attentive");
@@ -42,12 +43,19 @@ const StudentMonitor = () => {
   const [tabVisible, setTabVisible] = useState(true);
   const [faceDetected, setFaceDetected] = useState(true);
   const [sessionTime, setSessionTime] = useState(0);
-  const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
+  const [selectedClassId, setSelectedClassId] = useState<string | null>(searchParams.get("classId"));
   const [notOnScreenTime, setNotOnScreenTime] = useState(0);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-  const alertSoundRef = useRef<HTMLAudioElement | null>(null);
+  const [hasAlerted20Sec, setHasAlerted20Sec] = useState(false);
+  
   const previousStatusRef = useRef<"attentive" | "distracted" | "drowsy">("attentive");
   const hasAlertedNotOnScreenRef = useRef(false);
+
+  // Initialize alert sound
+  useEffect(() => {
+    alertSoundRef.current = new Audio("/alert-sound.mp3");
+    alertSoundRef.current.volume = 0.5;
+  }, []);
 
   // Fetch student's enrolled classes
   const { data: enrolledClasses } = useQuery({
@@ -69,12 +77,30 @@ const StudentMonitor = () => {
     },
   });
 
-  // Auto-select first class if only one is available
+  // Fetch selected class info for teacher name
+  const { data: selectedClass } = useQuery({
+    queryKey: ["selected-class", selectedClassId],
+    queryFn: async () => {
+      if (!selectedClassId) return null;
+      const { data } = await supabase
+        .from("classes")
+        .select(`*, profiles!classes_teacher_id_fkey(full_name)`)
+        .eq("id", selectedClassId)
+        .single();
+      return data;
+    },
+    enabled: !!selectedClassId,
+  });
+
+  // Auto-select class from URL or first class
   useEffect(() => {
-    if (enrolledClasses && enrolledClasses.length === 1 && !selectedClassId) {
+    const classIdFromUrl = searchParams.get("classId");
+    if (classIdFromUrl) {
+      setSelectedClassId(classIdFromUrl);
+    } else if (enrolledClasses && enrolledClasses.length === 1 && !selectedClassId) {
       setSelectedClassId(enrolledClasses[0].id);
     }
-  }, [enrolledClasses, selectedClassId]);
+  }, [enrolledClasses, selectedClassId, searchParams]);
 
   // Track tab visibility
   useEffect(() => {
@@ -106,70 +132,65 @@ const StudentMonitor = () => {
     return () => clearInterval(timer);
   }, [isMonitoring]);
 
-  // Immediate alert system for status changes with database notification
+  // Immediate alert system for status changes
   useEffect(() => {
     if (previousStatusRef.current !== status) {
       if (status === "distracted") {
-        // Play alert sound
         alertSoundRef.current?.play().catch(console.error);
-        
-        // Show visual alert
         toast({
           title: "⚠️ Distraction Detected",
           description: "Please focus on the class. Looking away detected.",
           variant: "destructive",
         });
       } else if (status === "drowsy") {
-        // Play alert sound multiple times for sleep detection
         alertSoundRef.current?.play().catch(console.error);
         setTimeout(() => alertSoundRef.current?.play().catch(console.error), 500);
         
-        // Show visual alert
         toast({
           title: "😴 SLEEPING DETECTED!",
           description: "Wake up! You appear to be sleeping. Your teacher has been notified!",
           variant: "destructive",
         });
 
-        // Send alert to database immediately for teacher notification
+        // Send alert immediately for drowsy
         if (currentSessionId) {
-          supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user) {
-              supabase.from("alerts").insert({
-                session_id: currentSessionId,
-                student_id: user.id,
-                alert_type: "drowsy",
-                severity: "high",
-                message: "Student detected sleeping/drowsy - eyes closed for extended period",
-              });
-            }
-          });
+          sendAlertToTeacher("drowsy", "Student detected sleeping/drowsy - eyes closed for extended period", "high");
         }
       } else if (status === "attentive" && previousStatusRef.current !== "attentive") {
-        // Student returned to being attentive
         toast({
           title: "✓ Back to Focus",
           description: "Great! You're now paying attention.",
         });
+        setHasAlerted20Sec(false); // Reset 20-sec alert flag
       }
       
       previousStatusRef.current = status;
     }
   }, [status, toast, currentSessionId]);
 
-  // Distraction timer and extended alerts
+  // Distraction timer with 20-second alert
   useEffect(() => {
     if (status === "distracted" || status === "drowsy") {
       const timer = setInterval(() => {
         setDistractionTime((prev) => {
           const newTime = prev + 1;
           
-          if (newTime === 60) {
+          // Alert teacher at 20 seconds
+          if (newTime === DISTRACTION_ALERT_THRESHOLD && !hasAlerted20Sec && currentSessionId) {
+            setHasAlerted20Sec(true);
+            alertSoundRef.current?.play().catch(console.error);
+            
             toast({
-              title: "Alert: Extended Distraction Detected",
-              description: "You've been distracted for 60 seconds. Your teacher has been notified.",
+              title: "⚠️ Alert Sent to Teacher",
+              description: `You've been ${status} for ${DISTRACTION_ALERT_THRESHOLD} seconds. Your teacher has been notified.`,
               variant: "destructive",
             });
+
+            sendAlertToTeacher(
+              status === "drowsy" ? "drowsy" : "prolonged_inattention",
+              `Student has been ${status} for ${DISTRACTION_ALERT_THRESHOLD}+ seconds`,
+              "high"
+            );
           }
           
           return newTime;
@@ -179,10 +200,11 @@ const StudentMonitor = () => {
       return () => clearInterval(timer);
     } else {
       setDistractionTime(0);
+      setHasAlerted20Sec(false);
     }
-  }, [status, toast]);
+  }, [status, toast, hasAlerted20Sec, currentSessionId]);
 
-  // Track "not on screen" time (face not detected)
+  // Track "not on screen" time
   useEffect(() => {
     if (!isMonitoring) return;
 
@@ -191,34 +213,17 @@ const StudentMonitor = () => {
         setNotOnScreenTime((prev) => {
           const newTime = prev + 1;
           
-          // Alert after 10 seconds of not being on screen
           if (newTime === 10 && !hasAlertedNotOnScreenRef.current) {
             hasAlertedNotOnScreenRef.current = true;
-            
-            // Play alert sound
             alertSoundRef.current?.play().catch(console.error);
             
-            // Show visual alert
             toast({
               title: "⚠️ Not On Screen",
               description: "You haven't been detected for 10 seconds. Please face the camera. Your teacher has been notified.",
               variant: "destructive",
             });
 
-            // Insert alert into database
-            if (currentSessionId) {
-              supabase.auth.getUser().then(({ data: { user } }) => {
-                if (user) {
-                  supabase.from("alerts").insert({
-                    session_id: currentSessionId,
-                    student_id: user.id,
-                    alert_type: "not_on_screen",
-                    severity: "high",
-                    message: "Student not detected on screen for 10+ seconds",
-                  });
-                }
-              });
-            }
+            sendAlertToTeacher("not_on_screen", "Student not detected on screen for 10+ seconds", "high");
           }
           
           return newTime;
@@ -232,9 +237,29 @@ const StudentMonitor = () => {
     }
   }, [faceDetected, isMonitoring, currentSessionId, toast]);
 
+  const sendAlertToTeacher = async (alertType: string, message: string, severity: string) => {
+    if (!currentSessionId) return;
+    
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", user.id)
+      .single();
+
+    await supabase.from("alerts").insert({
+      session_id: currentSessionId,
+      student_id: user.id,
+      alert_type: alertType,
+      severity,
+      message: `${profile?.full_name || "Student"}: ${message}`,
+    });
+  };
+
   const startMonitoring = async () => {
     try {
-      // Reset detection state for new session
       resetDetection();
       
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -245,7 +270,6 @@ const StudentMonitor = () => {
         videoRef.current.srcObject = stream;
         setIsMonitoring(true);
         
-        // Create monitoring session in database
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const { data: session } = await supabase
@@ -268,7 +292,6 @@ const StudentMonitor = () => {
           description: "Your attention is now being tracked. Stay focused!",
         });
 
-        // Start face detection loop
         detectLoop();
       }
     } catch (error) {
@@ -290,7 +313,6 @@ const StudentMonitor = () => {
     setNotOnScreenTime(0);
     hasAlertedNotOnScreenRef.current = false;
     
-    // Update session in database
     if (currentSessionId) {
       supabase
         .from("monitoring_sessions")
@@ -323,25 +345,17 @@ const StudentMonitor = () => {
     if (result.alerts && result.alerts.length > 0 && currentSessionId) {
       const now = Date.now();
       for (const alertType of result.alerts) {
-        // Check cooldown to prevent alert spam
         if (lastAlertTime[alertType] && now - lastAlertTime[alertType] < ALERT_COOLDOWN_MS) {
           continue;
         }
         
         if (alertType === "drowsy" || alertType === "yawning" || alertType === "not_on_screen" || alertType === "prolonged_inattention") {
           lastAlertTime[alertType] = now;
-          
-          supabase.auth.getUser().then(({ data: { user } }) => {
-            if (user) {
-              supabase.from("alerts").insert({
-                session_id: currentSessionId,
-                student_id: user.id,
-                alert_type: alertType,
-                severity: alertType === "drowsy" || alertType === "prolonged_inattention" ? "high" : "medium",
-                message: getAlertMessage(alertType),
-              });
-            }
-          });
+          sendAlertToTeacher(
+            alertType,
+            getAlertMessage(alertType),
+            alertType === "drowsy" || alertType === "prolonged_inattention" ? "high" : "medium"
+          );
         }
       }
     }
@@ -370,7 +384,7 @@ const StudentMonitor = () => {
       case "looking_away":
         return "Student looking away from screen";
       case "prolonged_inattention":
-        return "Student has been inattentive for over 60 seconds";
+        return "Student has been inattentive for over 20 seconds";
       default:
         return "Attention alert detected";
     }
@@ -423,7 +437,7 @@ const StudentMonitor = () => {
 
   return (
     <div className="min-h-screen bg-background p-6">
-      <div className="container mx-auto max-w-6xl">
+      <div className="container mx-auto max-w-7xl">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <Button variant="outline" onClick={() => navigate("/")}>
@@ -435,10 +449,23 @@ const StudentMonitor = () => {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Main Video Feed */}
-          <Card className="lg:col-span-2 p-6">
+          {/* Left Column - Teacher Stream & Broadcast */}
+          <div className="space-y-4">
+            {selectedClassId && (
+              <>
+                <TeacherStream
+                  teacherName={selectedClass?.profiles?.full_name || "Teacher"}
+                  isLive={isMonitoring}
+                />
+                <BroadcastMessages classId={selectedClassId} />
+              </>
+            )}
+          </div>
+
+          {/* Center - Student Video Feed */}
+          <Card className="p-6">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-foreground">Live Feed</h2>
+              <h2 className="text-xl font-semibold text-foreground">Your Camera</h2>
               {getStatusBadge()}
             </div>
 
@@ -455,7 +482,6 @@ const StudentMonitor = () => {
                 className="absolute top-0 left-0 h-full w-full"
               />
               
-              {/* Live Status Indicator */}
               {isMonitoring && (
                 <div className="absolute top-4 left-4">
                   <Badge 
@@ -538,8 +564,8 @@ const StudentMonitor = () => {
             </div>
           </Card>
 
-          {/* Stats Panel */}
-          <div className="space-y-6">
+          {/* Right Column - Stats Panel */}
+          <div className="space-y-4">
             {/* Session Info */}
             <Card className="p-6">
               <h3 className="mb-4 text-lg font-semibold text-foreground">Session Info</h3>
@@ -583,20 +609,25 @@ const StudentMonitor = () => {
               </p>
             </Card>
 
-            {/* Distraction Alert */}
+            {/* Distraction Alert - Updated for 20 second threshold */}
             {(status === "distracted" || status === "drowsy") && (
-              <Card className="border-warning bg-warning/5 p-6">
-                <div className="mb-2 flex items-center gap-2 text-warning">
+              <Card className="border-destructive bg-destructive/5 p-6">
+                <div className="mb-2 flex items-center gap-2 text-destructive">
                   <AlertTriangle className="h-5 w-5" />
                   <h3 className="font-semibold">Attention Alert</h3>
                 </div>
                 <p className="mb-2 text-sm text-muted-foreground">
                   You've been {status} for {distractionTime} seconds.
                 </p>
-                {distractionTime >= 45 && (
-                  <p className="text-sm font-medium text-warning">
-                    Teacher will be notified in {60 - distractionTime}s
+                {distractionTime < DISTRACTION_ALERT_THRESHOLD && (
+                  <p className="text-sm font-medium text-destructive">
+                    Teacher will be notified in {DISTRACTION_ALERT_THRESHOLD - distractionTime}s
                   </p>
+                )}
+                {distractionTime >= DISTRACTION_ALERT_THRESHOLD && (
+                  <Badge variant="destructive" className="mt-2">
+                    Teacher has been notified
+                  </Badge>
                 )}
               </Card>
             )}

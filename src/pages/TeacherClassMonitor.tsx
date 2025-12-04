@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Users, MessageSquare, Send, Share2 } from "lucide-react";
+import { ArrowLeft, Users, MessageSquare, Send, Share2, UserPlus } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import LiveSessionControls from "@/components/teacher/LiveSessionControls";
 import StudentGrid from "@/components/teacher/StudentGrid";
 import AlertsPanel from "@/components/teacher/AlertsPanel";
 import ClassStatsBar from "@/components/teacher/ClassStatsBar";
 import ShareClassLink from "@/components/teacher/ShareClassLink";
+import JoinRequestsPanel from "@/components/teacher/JoinRequestsPanel";
 
 interface StudentStatus {
   student_id: string;
@@ -33,6 +35,7 @@ const TeacherClassMonitor = () => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<string | null>(null);
   const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [joinRequests, setJoinRequests] = useState<any[]>([]);
   const alertSoundRef = useState(() => new Audio("/alert-sound.mp3"))[0];
 
   // Fetch class details
@@ -68,6 +71,90 @@ const TeacherClassMonitor = () => {
     },
     refetchInterval: 5000,
   });
+
+  // Fetch join requests
+  const fetchJoinRequests = async () => {
+    if (!classId) return;
+    
+    const { data } = await supabase
+      .from("join_requests")
+      .select("*")
+      .eq("class_id", classId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+
+    if (data) {
+      setJoinRequests(data);
+    }
+  };
+
+  // Approve join request mutation
+  const approveRequestMutation = useMutation({
+    mutationFn: async ({ requestId, studentId }: { requestId: string; studentId: string }) => {
+      // Update request status
+      await supabase
+        .from("join_requests")
+        .update({ status: "approved", responded_at: new Date().toISOString() })
+        .eq("id", requestId);
+
+      // Add student to class
+      await supabase.from("class_students").insert({
+        class_id: classId,
+        student_id: studentId,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "✓ Student approved and added to class" });
+      fetchJoinRequests();
+      queryClient.invalidateQueries({ queryKey: ["class-sessions", classId] });
+    },
+  });
+
+  // Reject join request mutation
+  const rejectRequestMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      await supabase
+        .from("join_requests")
+        .update({ status: "rejected", responded_at: new Date().toISOString() })
+        .eq("id", requestId);
+    },
+    onSuccess: () => {
+      toast({ title: "Request rejected" });
+      fetchJoinRequests();
+    },
+  });
+
+  // Subscribe to join requests
+  useEffect(() => {
+    if (!classId) return;
+
+    fetchJoinRequests();
+
+    const channel = supabase
+      .channel("join-requests-channel")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "join_requests",
+          filter: `class_id=eq.${classId}`,
+        },
+        (payload) => {
+          alertSoundRef.play().catch(console.error);
+          toast({
+            title: "🙋 New Join Request",
+            description: `${payload.new.student_name} wants to join the class`,
+          });
+          fetchJoinRequests();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [classId, toast, alertSoundRef]);
 
   // Acknowledge alert mutation
   const acknowledgeAlertMutation = useMutation({
@@ -210,9 +297,28 @@ const TeacherClassMonitor = () => {
     };
   }, [classId, toast, alertSoundRef]);
 
-  const handleBroadcastMessage = () => {
-    if (!broadcastMessage.trim()) return;
+  // Send broadcast message to database
+  const handleBroadcastMessage = async () => {
+    if (!broadcastMessage.trim() || !classId) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
     
+    const { error } = await supabase.from("broadcast_messages").insert({
+      class_id: classId,
+      teacher_id: user.id,
+      message: broadcastMessage,
+    });
+
+    if (error) {
+      toast({
+        title: "Error",
+        description: "Failed to send message",
+        variant: "destructive",
+      });
+      return;
+    }
+
     toast({
       title: "📢 Message Broadcast",
       description: `"${broadcastMessage}" sent to all students`,
@@ -227,6 +333,8 @@ const TeacherClassMonitor = () => {
     drowsy: studentStatuses.filter((s) => s.status === "drowsy").length,
     notOnScreen: studentStatuses.filter((s) => !s.face_detected).length,
   };
+
+  const pendingRequestsCount = joinRequests.filter((r) => r.status === "pending").length;
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
@@ -260,10 +368,19 @@ const TeacherClassMonitor = () => {
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="students" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger value="students" className="flex items-center gap-2">
               <Users className="h-4 w-4" />
               Students
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="flex items-center gap-2">
+              <UserPlus className="h-4 w-4" />
+              Requests
+              {pendingRequestsCount > 0 && (
+                <Badge variant="secondary" className="ml-1">
+                  {pendingRequestsCount}
+                </Badge>
+              )}
             </TabsTrigger>
             <TabsTrigger value="alerts" className="flex items-center gap-2">
               🔔 Alerts
@@ -301,6 +418,17 @@ const TeacherClassMonitor = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="requests">
+            <JoinRequestsPanel
+              requests={joinRequests}
+              onApprove={(requestId, studentId) => 
+                approveRequestMutation.mutate({ requestId, studentId })
+              }
+              onReject={(requestId) => rejectRequestMutation.mutate(requestId)}
+              isLoading={approveRequestMutation.isPending || rejectRequestMutation.isPending}
+            />
+          </TabsContent>
+
           <TabsContent value="alerts">
             <AlertsPanel
               alerts={alerts}
@@ -329,7 +457,7 @@ const TeacherClassMonitor = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Send a message to all students in this class.
+                  Send a message to all students in this class. They will receive it instantly with a notification sound.
                 </p>
                 <div className="flex gap-2">
                   <Input
