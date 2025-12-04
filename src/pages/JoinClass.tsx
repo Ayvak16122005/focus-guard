@@ -7,13 +7,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Users, ArrowRight } from "lucide-react";
+import { Users, ArrowRight, Link as LinkIcon, Loader2 } from "lucide-react";
+import WaitingRoom from "@/components/student/WaitingRoom";
 
 const JoinClass = () => {
   const { code } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [joinCode, setJoinCode] = useState(code || "");
+  const [linkInput, setLinkInput] = useState("");
+  const [waitingRequest, setWaitingRequest] = useState<{
+    id: string;
+    className: string;
+    classId: string;
+  } | null>(null);
 
   useEffect(() => {
     if (code) {
@@ -21,19 +28,28 @@ const JoinClass = () => {
     }
   }, [code]);
 
+  // Extract code from link input
+  const handleLinkInput = (value: string) => {
+    setLinkInput(value);
+    // Extract code from URL like /join/ABC123
+    const match = value.match(/\/join\/([A-Z0-9]{6})/i);
+    if (match) {
+      setJoinCode(match[1].toUpperCase());
+    }
+  };
+
   // Fetch class by join code
   const fetchClassData = async (code: string) => {
     if (!code) return null;
 
     try {
-      // @ts-ignore - Supabase type inference issue with complex queries
       const classQuery: any = supabase
         .from("classes")
         .select("*")
         .eq("join_code", code.toUpperCase())
         .eq("is_active", true)
         .maybeSingle();
-      
+
       const { data: classData, error: classError } = await classQuery;
 
       if (classError) throw classError;
@@ -67,13 +83,20 @@ const JoinClass = () => {
     enabled: joinCode.length === 6,
   });
 
-  // Join class mutation
-  const joinClassMutation = useMutation({
+  // Request to join class mutation (with approval)
+  const joinRequestMutation = useMutation({
     mutationFn: async () => {
       if (!classData) throw new Error("Class not found");
 
       const userResult = await supabase.auth.getUser();
       if (!userResult.data.user) throw new Error("Not authenticated");
+
+      // Get user profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name")
+        .eq("id", userResult.data.user.id)
+        .single();
 
       // Check if already enrolled
       const existing = await supabase
@@ -84,18 +107,40 @@ const JoinClass = () => {
         .maybeSingle();
 
       if (existing.data) {
-        return { alreadyEnrolled: true };
+        return { alreadyEnrolled: true, requestId: null };
       }
 
-      const insertResult = await supabase
-        .from("class_students")
+      // Check if there's already a pending request
+      const { data: existingRequest } = await supabase
+        .from("join_requests")
+        .select()
+        .eq("class_id", classData.id)
+        .eq("student_id", userResult.data.user.id)
+        .eq("status", "pending")
+        .maybeSingle();
+
+      if (existingRequest) {
+        return {
+          alreadyEnrolled: false,
+          requestId: existingRequest.id,
+          alreadyRequested: true,
+        };
+      }
+
+      // Create join request for teacher approval
+      const { data: request, error } = await supabase
+        .from("join_requests")
         .insert({
           class_id: classData.id,
           student_id: userResult.data.user.id,
-        });
+          student_name: profile?.full_name || "Student",
+          status: "pending",
+        })
+        .select()
+        .single();
 
-      if (insertResult.error) throw insertResult.error;
-      return { alreadyEnrolled: false };
+      if (error) throw error;
+      return { alreadyEnrolled: false, requestId: request.id };
     },
     onSuccess: (result) => {
       if (result.alreadyEnrolled) {
@@ -103,13 +148,18 @@ const JoinClass = () => {
           title: "Already Enrolled",
           description: "You're already part of this class!",
         });
-      } else {
+        navigate("/student");
+      } else if (result.requestId) {
         toast({
-          title: "✓ Joined Successfully",
-          description: "You've been enrolled in the class!",
+          title: "Request Sent!",
+          description: "Waiting for teacher approval...",
+        });
+        setWaitingRequest({
+          id: result.requestId,
+          className: classData?.name || "Class",
+          classId: classData?.id || "",
         });
       }
-      navigate("/student");
     },
     onError: (error: any) => {
       toast({
@@ -120,6 +170,17 @@ const JoinClass = () => {
     },
   });
 
+  // Show waiting room if request is pending
+  if (waitingRequest) {
+    return (
+      <WaitingRoom
+        requestId={waitingRequest.id}
+        className={waitingRequest.className}
+        classId={waitingRequest.classId}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-6">
       <Card className="w-full max-w-md">
@@ -129,10 +190,34 @@ const JoinClass = () => {
           </div>
           <CardTitle>Join a Class</CardTitle>
           <CardDescription>
-            Enter the class code provided by your teacher
+            Enter the class code or paste a join link
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Link Input */}
+          <div className="space-y-2">
+            <Label htmlFor="linkInput" className="flex items-center gap-2">
+              <LinkIcon className="h-4 w-4" />
+              Paste Join Link (optional)
+            </Label>
+            <Input
+              id="linkInput"
+              placeholder="https://...../join/ABC123"
+              value={linkInput}
+              onChange={(e) => handleLinkInput(e.target.value)}
+              className="text-sm"
+            />
+          </div>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">Or enter code</span>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="joinCode">Class Code</Label>
             <Input
@@ -146,13 +231,14 @@ const JoinClass = () => {
           </div>
 
           {isLoading && joinCode.length === 6 && (
-            <div className="text-center text-sm text-muted-foreground">
+            <div className="text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
               Looking up class...
             </div>
           )}
 
           {classData && (
-            <Card className="bg-muted/50">
+            <Card className="bg-muted/50 border-primary/20">
               <CardContent className="pt-6 space-y-2">
                 <div className="text-sm text-muted-foreground">Class Found</div>
                 <div className="font-semibold text-lg">{classData.name}</div>
@@ -179,11 +265,20 @@ const JoinClass = () => {
 
           <Button
             className="w-full"
-            onClick={() => joinClassMutation.mutate()}
-            disabled={!classData || joinClassMutation.isPending}
+            onClick={() => joinRequestMutation.mutate()}
+            disabled={!classData || joinRequestMutation.isPending}
           >
-            {joinClassMutation.isPending ? "Joining..." : "Join Class"}
-            <ArrowRight className="ml-2 h-4 w-4" />
+            {joinRequestMutation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Requesting...
+              </>
+            ) : (
+              <>
+                Request to Join
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </>
+            )}
           </Button>
 
           <Button

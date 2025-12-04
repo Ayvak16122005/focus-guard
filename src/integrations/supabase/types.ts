@@ -97,6 +97,45 @@ export type Database = {
           },
         ]
       }
+      broadcast_messages: {
+        Row: {
+          class_id: string
+          created_at: string
+          id: string
+          message: string
+          teacher_id: string
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          id?: string
+          message: string
+          teacher_id: string
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          id?: string
+          message?: string
+          teacher_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_messages_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_messages_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       class_students: {
         Row: {
           class_id: string
@@ -165,6 +204,51 @@ export type Database = {
           {
             foreignKeyName: "classes_teacher_id_fkey"
             columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      join_requests: {
+        Row: {
+          class_id: string
+          created_at: string
+          id: string
+          responded_at: string | null
+          status: string
+          student_id: string
+          student_name: string
+        }
+        Insert: {
+          class_id: string
+          created_at?: string
+          id?: string
+          responded_at?: string | null
+          status?: string
+          student_id: string
+          student_name: string
+        }
+        Update: {
+          class_id?: string
+          created_at?: string
+          id?: string
+          responded_at?: string | null
+          status?: string
+          student_id?: string
+          student_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "join_requests_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: false
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "join_requests_student_id_fkey"
+            columns: ["student_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
