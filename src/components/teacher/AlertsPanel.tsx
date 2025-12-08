@@ -29,6 +29,8 @@ const AlertsPanel = ({ alerts, onAcknowledge, onPlaySound }: AlertsPanelProps) =
     switch (alertType) {
       case "drowsy":
         return <Badge variant="destructive">😴 Sleeping</Badge>;
+      case "sleeping":
+        return <Badge variant="destructive">💤 SLEEPING!</Badge>;
       case "yawning":
         return <Badge className="bg-warning text-warning-foreground">🥱 Yawning</Badge>;
       case "not_on_screen":
@@ -37,6 +39,10 @@ const AlertsPanel = ({ alerts, onAcknowledge, onPlaySound }: AlertsPanelProps) =
         return <Badge variant="secondary">👀 Looking Away</Badge>;
       case "prolonged_inattention":
         return <Badge variant="destructive">⏰ Extended Inattention</Badge>;
+      case "tab_switch":
+        return <Badge variant="destructive">📱 Tab/App Switched</Badge>;
+      case "window_blur":
+        return <Badge className="bg-warning text-warning-foreground">🖥️ Focus Lost</Badge>;
       default:
         return <Badge variant="secondary">{alertType}</Badge>;
     }
