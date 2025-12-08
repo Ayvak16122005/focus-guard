@@ -26,6 +26,8 @@ import BroadcastMessages from "@/components/student/BroadcastMessages";
 const lastAlertTime: Record<string, number> = {};
 const ALERT_COOLDOWN_MS = 30000; // 30 seconds between same alert types
 const DISTRACTION_ALERT_THRESHOLD = 20; // Alert teacher after 20 seconds
+const DROWSY_BEEP_THRESHOLD = 15; // 15 seconds of eyes closed = beep alerts
+const TAB_SWITCH_ALERT_COOLDOWN = 10000; // 10 seconds between tab switch alerts
 
 const StudentMonitor = () => {
   const navigate = useNavigate();
@@ -47,14 +49,35 @@ const StudentMonitor = () => {
   const [notOnScreenTime, setNotOnScreenTime] = useState(0);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [hasAlerted20Sec, setHasAlerted20Sec] = useState(false);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [drowsyTime, setDrowsyTime] = useState(0);
+  const [hasPlayedDrowsyBeeps, setHasPlayedDrowsyBeeps] = useState(false);
+  const [studentName, setStudentName] = useState<string>("Student");
   
   const previousStatusRef = useRef<"attentive" | "distracted" | "drowsy">("attentive");
   const hasAlertedNotOnScreenRef = useRef(false);
+  const lastTabSwitchAlertRef = useRef<number>(0);
 
-  // Initialize alert sound
+  // Initialize alert sound and fetch student name
   useEffect(() => {
     alertSoundRef.current = new Audio("/alert-sound.mp3");
-    alertSoundRef.current.volume = 0.5;
+    alertSoundRef.current.volume = 0.7;
+    
+    // Fetch student name for alerts
+    const fetchStudentName = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", user.id)
+          .single();
+        if (profile?.full_name) {
+          setStudentName(profile.full_name);
+        }
+      }
+    };
+    fetchStudentName();
   }, []);
 
   // Fetch student's enrolled classes
@@ -102,24 +125,89 @@ const StudentMonitor = () => {
     }
   }, [enrolledClasses, selectedClassId, searchParams]);
 
-  // Track tab visibility
+  // Track tab visibility with enhanced detection and alerts
   useEffect(() => {
-    const handleVisibilityChange = () => {
+    const handleVisibilityChange = async () => {
       const isVisible = !document.hidden;
       setTabVisible(isVisible);
       
-      if (!isVisible && isMonitoring) {
+      if (!isVisible && isMonitoring && currentSessionId) {
+        const now = Date.now();
+        setTabSwitchCount(prev => prev + 1);
+        
+        // Play alert sound for student
+        alertSoundRef.current?.play().catch(console.error);
+        
+        // Show warning to student
         toast({
-          title: "Warning: Tab Switched",
-          description: "Please return to the class. This has been logged.",
+          title: "⚠️ TAB SWITCH DETECTED!",
+          description: "Don't switch tabs or apps! Please return to the class immediately. This has been logged.",
           variant: "destructive",
+        });
+        
+        // Alert teacher (with cooldown to prevent spam)
+        if (now - lastTabSwitchAlertRef.current > TAB_SWITCH_ALERT_COOLDOWN) {
+          lastTabSwitchAlertRef.current = now;
+          
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from("alerts").insert({
+              session_id: currentSessionId,
+              student_id: user.id,
+              alert_type: "tab_switch",
+              severity: "high",
+              message: `${studentName} is not being attentive - switched to another tab/app while attending the online class`,
+            });
+          }
+        }
+      } else if (isVisible && isMonitoring) {
+        // Student returned
+        toast({
+          title: "✓ Welcome Back",
+          description: "Stay focused on the class!",
         });
       }
     };
 
+    // Also detect window blur (when user clicks outside browser)
+    const handleWindowBlur = async () => {
+      if (isMonitoring && currentSessionId) {
+        const now = Date.now();
+        
+        // Play alert sound
+        alertSoundRef.current?.play().catch(console.error);
+        
+        toast({
+          title: "⚠️ FOCUS LOST!",
+          description: "You clicked outside the class window. Please stay on the class!",
+          variant: "destructive",
+        });
+        
+        if (now - lastTabSwitchAlertRef.current > TAB_SWITCH_ALERT_COOLDOWN) {
+          lastTabSwitchAlertRef.current = now;
+          
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            await supabase.from("alerts").insert({
+              session_id: currentSessionId,
+              student_id: user.id,
+              alert_type: "window_blur",
+              severity: "medium",
+              message: `${studentName} may be using other apps - focus lost from class window`,
+            });
+          }
+        }
+      }
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [isMonitoring, toast]);
+    window.addEventListener("blur", handleWindowBlur);
+    
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [isMonitoring, toast, currentSessionId, studentName]);
 
   // Session timer
   useEffect(() => {
@@ -144,29 +232,29 @@ const StudentMonitor = () => {
         });
       } else if (status === "drowsy") {
         alertSoundRef.current?.play().catch(console.error);
-        setTimeout(() => alertSoundRef.current?.play().catch(console.error), 500);
         
         toast({
-          title: "😴 SLEEPING DETECTED!",
-          description: "Wake up! You appear to be sleeping. Your teacher has been notified!",
+          title: "😴 DROWSINESS DETECTED!",
+          description: "Your eyes appear to be closing. Stay awake!",
           variant: "destructive",
         });
-
-        // Send alert immediately for drowsy
-        if (currentSessionId) {
-          sendAlertToTeacher("drowsy", "Student detected sleeping/drowsy - eyes closed for extended period", "high");
-        }
+        
+        // Reset drowsy timer when entering drowsy state
+        setDrowsyTime(0);
+        setHasPlayedDrowsyBeeps(false);
       } else if (status === "attentive" && previousStatusRef.current !== "attentive") {
         toast({
           title: "✓ Back to Focus",
           description: "Great! You're now paying attention.",
         });
-        setHasAlerted20Sec(false); // Reset 20-sec alert flag
+        setHasAlerted20Sec(false);
+        setDrowsyTime(0);
+        setHasPlayedDrowsyBeeps(false);
       }
       
       previousStatusRef.current = status;
     }
-  }, [status, toast, currentSessionId]);
+  }, [status, toast]);
 
   // Distraction timer with 20-second alert
   useEffect(() => {
@@ -188,7 +276,7 @@ const StudentMonitor = () => {
 
             sendAlertToTeacher(
               status === "drowsy" ? "drowsy" : "prolonged_inattention",
-              `Student has been ${status} for ${DISTRACTION_ALERT_THRESHOLD}+ seconds`,
+              `${studentName} has been ${status} for ${DISTRACTION_ALERT_THRESHOLD}+ seconds - not being attentive in class`,
               "high"
             );
           }
@@ -202,28 +290,42 @@ const StudentMonitor = () => {
       setDistractionTime(0);
       setHasAlerted20Sec(false);
     }
-  }, [status, toast, hasAlerted20Sec, currentSessionId]);
+  }, [status, toast, hasAlerted20Sec, currentSessionId, studentName]);
 
-  // Track "not on screen" time
+  // Drowsy/eyes closed timer - play 3-4 beeps after 15 seconds
   useEffect(() => {
-    if (!isMonitoring) return;
-
-    if (!faceDetected) {
+    if (status === "drowsy" && isMonitoring) {
       const timer = setInterval(() => {
-        setNotOnScreenTime((prev) => {
+        setDrowsyTime((prev) => {
           const newTime = prev + 1;
           
-          if (newTime === 10 && !hasAlertedNotOnScreenRef.current) {
-            hasAlertedNotOnScreenRef.current = true;
-            alertSoundRef.current?.play().catch(console.error);
+          // Play 3-4 beep sounds after 15 seconds of eyes closed
+          if (newTime >= DROWSY_BEEP_THRESHOLD && !hasPlayedDrowsyBeeps) {
+            setHasPlayedDrowsyBeeps(true);
+            
+            // Play 4 beep sounds with intervals to wake up the student
+            const playBeeps = async () => {
+              for (let i = 0; i < 4; i++) {
+                await new Promise(resolve => setTimeout(resolve, i * 400));
+                alertSoundRef.current?.play().catch(console.error);
+              }
+            };
+            playBeeps();
             
             toast({
-              title: "⚠️ Not On Screen",
-              description: "You haven't been detected for 10 seconds. Please face the camera. Your teacher has been notified.",
+              title: "🚨 WAKE UP! WAKE UP!",
+              description: "Your eyes have been closed for 15+ seconds! You appear to be sleeping. ATTEND THE CLASS!",
               variant: "destructive",
             });
-
-            sendAlertToTeacher("not_on_screen", "Student not detected on screen for 10+ seconds", "high");
+            
+            // Alert teacher about sleeping
+            if (currentSessionId) {
+              sendAlertToTeacher(
+                "sleeping",
+                `${studentName} is SLEEPING - eyes closed for ${DROWSY_BEEP_THRESHOLD}+ seconds during class!`,
+                "high"
+              );
+            }
           }
           
           return newTime;
@@ -232,10 +334,60 @@ const StudentMonitor = () => {
 
       return () => clearInterval(timer);
     } else {
+      setDrowsyTime(0);
+      setHasPlayedDrowsyBeeps(false);
+    }
+  }, [status, isMonitoring, hasPlayedDrowsyBeeps, currentSessionId, studentName, toast]);
+
+  // Track "not on screen" time with persistent alerts
+  useEffect(() => {
+    if (!isMonitoring) return;
+
+    if (!faceDetected) {
+      const timer = setInterval(() => {
+        setNotOnScreenTime((prev) => {
+          const newTime = prev + 1;
+          
+          // First alert at 10 seconds
+          if (newTime === 10 && !hasAlertedNotOnScreenRef.current) {
+            hasAlertedNotOnScreenRef.current = true;
+            alertSoundRef.current?.play().catch(console.error);
+            
+            toast({
+              title: "📷 COME BACK TO THE FRAME!",
+              description: "You are not visible on camera. Please position yourself in front of the camera immediately!",
+              variant: "destructive",
+            });
+
+            sendAlertToTeacher("not_on_screen", `${studentName} is NOT visible on camera - may have left the class`, "high");
+          }
+          
+          // Reminder every 10 seconds
+          if (newTime > 10 && newTime % 10 === 0) {
+            alertSoundRef.current?.play().catch(console.error);
+            toast({
+              title: "📷 YOU ARE NOT VISIBLE!",
+              description: `You've been out of frame for ${newTime} seconds. Please face the camera NOW!`,
+              variant: "destructive",
+            });
+          }
+          
+          return newTime;
+        });
+      }, 1000);
+
+      return () => clearInterval(timer);
+    } else {
+      if (notOnScreenTime > 0) {
+        toast({
+          title: "✓ You're back on camera",
+          description: "Great! Stay visible throughout the class.",
+        });
+      }
       setNotOnScreenTime(0);
       hasAlertedNotOnScreenRef.current = false;
     }
-  }, [faceDetected, isMonitoring, currentSessionId, toast]);
+  }, [faceDetected, isMonitoring, currentSessionId, toast, studentName, notOnScreenTime]);
 
   const sendAlertToTeacher = async (alertType: string, message: string, severity: string) => {
     if (!currentSessionId) return;
@@ -579,7 +731,13 @@ const StudentMonitor = () => {
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Tab Status</span>
                   <Badge variant={tabVisible ? "default" : "destructive"}>
-                    {tabVisible ? "Active" : "Hidden"}
+                    {tabVisible ? "Active" : "Switched!"}
+                  </Badge>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Tab Switches</span>
+                  <Badge variant={tabSwitchCount > 0 ? "destructive" : "default"}>
+                    {tabSwitchCount}
                   </Badge>
                 </div>
                 <div className="flex justify-between">
@@ -588,6 +746,18 @@ const StudentMonitor = () => {
                     {faceDetected ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                   </Badge>
                 </div>
+                {notOnScreenTime > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-destructive">Not visible for</span>
+                    <Badge variant="destructive">{notOnScreenTime}s</Badge>
+                  </div>
+                )}
+                {drowsyTime > 0 && status === "drowsy" && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-destructive">Eyes closed for</span>
+                    <Badge variant="destructive">{drowsyTime}s</Badge>
+                  </div>
+                )}
               </div>
             </Card>
 
