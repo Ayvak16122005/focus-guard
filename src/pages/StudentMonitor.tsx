@@ -339,7 +339,7 @@ const StudentMonitor = () => {
     }
   }, [status, isMonitoring, hasPlayedDrowsyBeeps, currentSessionId, studentName, toast]);
 
-  // Track "not on screen" time with persistent alerts
+  // Track "not on screen" time with persistent alerts - 10 second threshold
   useEffect(() => {
     if (!isMonitoring) return;
 
@@ -348,28 +348,51 @@ const StudentMonitor = () => {
         setNotOnScreenTime((prev) => {
           const newTime = prev + 1;
           
-          // First alert at 10 seconds
+          // First alert at exactly 10 seconds - alert student AND teacher
           if (newTime === 10 && !hasAlertedNotOnScreenRef.current) {
             hasAlertedNotOnScreenRef.current = true;
-            alertSoundRef.current?.play().catch(console.error);
             
+            // Play multiple alert sounds for attention
+            const playAlertSounds = async () => {
+              for (let i = 0; i < 3; i++) {
+                await new Promise(resolve => setTimeout(resolve, i * 300));
+                alertSoundRef.current?.play().catch(console.error);
+              }
+            };
+            playAlertSounds();
+            
+            // Show prominent toast to student
             toast({
-              title: "📷 COME BACK TO THE FRAME!",
-              description: "You are not visible on camera. Please position yourself in front of the camera immediately!",
+              title: "📷 STAY WITHIN THE FRAME!",
+              description: "You are NOT visible on camera for 10+ seconds! Please position yourself in front of the camera immediately. Your teacher has been notified.",
               variant: "destructive",
             });
 
-            sendAlertToTeacher("not_on_screen", `${studentName} is NOT visible on camera - may have left the class`, "high");
+            // Send notification to teacher with student name
+            sendAlertToTeacher(
+              "not_on_screen", 
+              `${studentName} is NOT visible on camera for 10+ seconds - may have left the class or moved away from camera`, 
+              "high"
+            );
           }
           
-          // Reminder every 10 seconds
+          // Reminder every 10 seconds while still not visible
           if (newTime > 10 && newTime % 10 === 0) {
             alertSoundRef.current?.play().catch(console.error);
             toast({
-              title: "📷 YOU ARE NOT VISIBLE!",
-              description: `You've been out of frame for ${newTime} seconds. Please face the camera NOW!`,
+              title: "📷 YOU ARE STILL NOT VISIBLE!",
+              description: `You've been out of frame for ${newTime} seconds. Please face the camera NOW! This is being recorded.`,
               variant: "destructive",
             });
+            
+            // Send follow-up alert to teacher every 30 seconds
+            if (newTime % 30 === 0) {
+              sendAlertToTeacher(
+                "not_on_screen_prolonged", 
+                `${studentName} has been NOT visible on camera for ${newTime} seconds - persistent absence from camera`, 
+                "high"
+              );
+            }
           }
           
           return newTime;
@@ -380,8 +403,8 @@ const StudentMonitor = () => {
     } else {
       if (notOnScreenTime > 0) {
         toast({
-          title: "✓ You're back on camera",
-          description: "Great! Stay visible throughout the class.",
+          title: "✓ You're back on camera!",
+          description: "Great! Stay visible throughout the class session.",
         });
       }
       setNotOnScreenTime(0);
