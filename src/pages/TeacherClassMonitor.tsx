@@ -24,6 +24,9 @@ interface StudentStatus {
   face_detected: boolean;
   last_updated: string;
   session_id: string;
+  login_time?: string;
+  logout_time?: string | null;
+  session_duration?: number;
 }
 
 const TeacherClassMonitor = () => {
@@ -53,7 +56,7 @@ const TeacherClassMonitor = () => {
     },
   });
 
-  // Fetch active monitoring sessions
+  // Fetch active monitoring sessions with timing data
   const { data: sessions } = useQuery({
     queryKey: ["class-sessions", classId],
     queryFn: async () => {
@@ -63,14 +66,56 @@ const TeacherClassMonitor = () => {
           *,
           profiles!monitoring_sessions_student_id_fkey(full_name)
         `)
-        .eq("class_id", classId)
-        .eq("status", "active");
+        .eq("class_id", classId);
 
       if (error) throw error;
       return data;
     },
     refetchInterval: 5000,
   });
+
+  // Calculate session duration in seconds
+  const calculateDuration = (startedAt: string, endedAt?: string | null) => {
+    const start = new Date(startedAt).getTime();
+    const end = endedAt ? new Date(endedAt).getTime() : Date.now();
+    return Math.floor((end - start) / 1000);
+  };
+
+  // Update student statuses with session timing
+  useEffect(() => {
+    if (!sessions) return;
+
+    const activeStudents: StudentStatus[] = sessions
+      .filter((s) => s.status === "active")
+      .map((session) => ({
+        student_id: session.student_id,
+        student_name: session.profiles?.full_name || "Unknown",
+        status: "attentive" as const,
+        attention_score: session.average_attention_score || 100,
+        face_detected: true,
+        last_updated: session.started_at || new Date().toISOString(),
+        session_id: session.id,
+        login_time: session.started_at,
+        logout_time: session.ended_at,
+        session_duration: calculateDuration(session.started_at, session.ended_at),
+      }));
+
+    setStudentStatuses((prev) => {
+      // Merge with existing statuses to preserve real-time attention data
+      return activeStudents.map((newStudent) => {
+        const existing = prev.find((p) => p.student_id === newStudent.student_id);
+        if (existing) {
+          return {
+            ...existing,
+            login_time: newStudent.login_time,
+            logout_time: newStudent.logout_time,
+            session_duration: newStudent.session_duration,
+          };
+        }
+        return newStudent;
+      });
+    });
+  }, [sessions]);
 
   // Fetch join requests
   const fetchJoinRequests = async () => {
@@ -216,6 +261,8 @@ const TeacherClassMonitor = () => {
             .from("monitoring_sessions")
             .select(`
               student_id,
+              started_at,
+              ended_at,
               profiles!monitoring_sessions_student_id_fkey(full_name)
             `)
             .eq("id", metric.session_id)
@@ -233,6 +280,9 @@ const TeacherClassMonitor = () => {
                 face_detected: metric.face_detected,
                 last_updated: metric.timestamp,
                 session_id: metric.session_id,
+                login_time: session.started_at,
+                logout_time: session.ended_at,
+                session_duration: calculateDuration(session.started_at, session.ended_at),
               };
 
               if (existing) {
@@ -249,7 +299,7 @@ const TeacherClassMonitor = () => {
                 }
 
                 return prev.map((s) =>
-                  s.student_id === session.student_id ? newStatus : s
+                  s.student_id === session.student_id ? { ...newStatus, login_time: existing.login_time || newStatus.login_time } : s
                 );
               }
 

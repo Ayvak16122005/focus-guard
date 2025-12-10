@@ -1,7 +1,8 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Eye, EyeOff, Moon, AlertCircle, Mic, MicOff } from "lucide-react";
+import { Eye, EyeOff, Moon, AlertCircle, Clock, LogIn, LogOut } from "lucide-react";
+import { format } from "date-fns";
 
 interface StudentStatus {
   student_id: string;
@@ -11,6 +12,9 @@ interface StudentStatus {
   face_detected: boolean;
   last_updated: string;
   session_id: string;
+  login_time?: string;
+  logout_time?: string | null;
+  session_duration?: number;
 }
 
 interface StudentGridProps {
@@ -18,6 +22,19 @@ interface StudentGridProps {
   onStudentClick?: (studentId: string) => void;
   selectedStudentId?: string | null;
 }
+
+const formatTime = (isoString?: string | null) => {
+  if (!isoString) return "--:--";
+  return format(new Date(isoString), "hh:mm a");
+};
+
+const formatDuration = (seconds?: number) => {
+  if (!seconds || seconds < 0) return "0m";
+  const hours = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+};
 
 const StudentGrid = ({ students, onStudentClick, selectedStudentId }: StudentGridProps) => {
   const getStatusIcon = (student: StudentStatus) => {
@@ -142,9 +159,36 @@ const StudentGrid = ({ students, onStudentClick, selectedStudentId }: StudentGri
                 {/* Status Badge */}
                 <div className="flex justify-center">{getStatusBadge(student)}</div>
 
+                {/* Login/Logout Timing */}
+                <div className="mt-2 pt-2 border-t border-border/50 space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1 text-success">
+                      <LogIn className="h-3 w-3" />
+                      Login
+                    </span>
+                    <span className="font-medium">{formatTime(student.login_time)}</span>
+                  </div>
+                  {student.logout_time && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="flex items-center gap-1 text-destructive">
+                        <LogOut className="h-3 w-3" />
+                        Logout
+                      </span>
+                      <span className="font-medium">{formatTime(student.logout_time)}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      Duration
+                    </span>
+                    <span className="font-medium">{formatDuration(student.session_duration)}</span>
+                  </div>
+                </div>
+
                 {/* Not Live Warning */}
                 {!student.face_detected && (
-                  <p className="text-xs text-destructive text-center">
+                  <p className="text-xs text-destructive text-center mt-1">
                     ● Not visible on camera
                   </p>
                 )}
