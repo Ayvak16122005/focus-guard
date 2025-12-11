@@ -630,7 +630,7 @@ const StudentMonitor = () => {
               <>
                 <TeacherStream
                   teacherName={selectedClass?.profiles?.full_name || "Teacher"}
-                  isLive={isMonitoring}
+                  classId={selectedClassId}
                 />
                 <BroadcastMessages classId={selectedClassId} />
               </>

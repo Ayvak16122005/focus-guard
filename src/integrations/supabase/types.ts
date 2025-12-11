@@ -255,6 +255,63 @@ export type Database = {
           },
         ]
       }
+      live_sessions: {
+        Row: {
+          camera_on: boolean
+          class_id: string
+          created_at: string
+          ended_at: string | null
+          id: string
+          is_live: boolean
+          mic_on: boolean
+          screen_sharing: boolean
+          started_at: string | null
+          teacher_id: string
+          updated_at: string
+        }
+        Insert: {
+          camera_on?: boolean
+          class_id: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_live?: boolean
+          mic_on?: boolean
+          screen_sharing?: boolean
+          started_at?: string | null
+          teacher_id: string
+          updated_at?: string
+        }
+        Update: {
+          camera_on?: boolean
+          class_id?: string
+          created_at?: string
+          ended_at?: string | null
+          id?: string
+          is_live?: boolean
+          mic_on?: boolean
+          screen_sharing?: boolean
+          started_at?: string | null
+          teacher_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_sessions_class_id_fkey"
+            columns: ["class_id"]
+            isOneToOne: true
+            referencedRelation: "classes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_sessions_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       monitoring_sessions: {
         Row: {
           average_attention_score: number | null
