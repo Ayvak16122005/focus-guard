@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useLiveSession } from "@/hooks/useLiveSession";
 import {
   Video,
   VideoOff,
@@ -35,22 +34,13 @@ const LiveSessionControls = ({
   onSessionEnd,
 }: LiveSessionControlsProps) => {
   const { toast } = useToast();
-  const {
-    isLive,
-    cameraOn,
-    micOn,
-    screenSharing,
-    startSession,
-    endSession,
-    updateSession,
-  } = useLiveSession(classId);
-
+  const [isLive, setIsLive] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [sessionDuration, setSessionDuration] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [localCameraOn, setLocalCameraOn] = useState(false);
-  const [localMicOn, setLocalMicOn] = useState(false);
-  const [localScreenSharing, setLocalScreenSharing] = useState(false);
-
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const screenRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -86,8 +76,8 @@ const LiveSessionControls = ({
       .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const handleStartSession = async () => {
-    await startSession();
+  const startSession = async () => {
+    setIsLive(true);
     onSessionStart?.();
     toast({
       title: "🎬 Live Session Started",
@@ -95,7 +85,7 @@ const LiveSessionControls = ({
     });
   };
 
-  const handleEndSession = async () => {
+  const endSession = () => {
     // Stop all streams
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
@@ -106,11 +96,10 @@ const LiveSessionControls = ({
       screenStreamRef.current = null;
     }
 
-    setLocalCameraOn(false);
-    setLocalMicOn(false);
-    setLocalScreenSharing(false);
-
-    await endSession();
+    setIsLive(false);
+    setIsCameraOn(false);
+    setIsMicOn(false);
+    setIsScreenSharing(false);
     onSessionEnd?.();
 
     toast({
@@ -120,18 +109,17 @@ const LiveSessionControls = ({
   };
 
   const toggleCamera = async () => {
-    if (!localCameraOn) {
+    if (!isCameraOn) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: localMicOn,
+          audio: isMicOn,
         });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-        setLocalCameraOn(true);
-        await updateSession({ cameraOn: true });
+        setIsCameraOn(true);
         toast({
           title: "Camera On",
           description: "Your camera is now visible to students.",
@@ -146,20 +134,19 @@ const LiveSessionControls = ({
     } else {
       if (streamRef.current) {
         streamRef.current.getVideoTracks().forEach((track) => track.stop());
-        if (!localMicOn) {
+        if (!isMicOn) {
           streamRef.current = null;
         }
       }
       if (videoRef.current) {
         videoRef.current.srcObject = null;
       }
-      setLocalCameraOn(false);
-      await updateSession({ cameraOn: false });
+      setIsCameraOn(false);
     }
   };
 
   const toggleMic = async () => {
-    if (!localMicOn) {
+    if (!isMicOn) {
       try {
         if (streamRef.current) {
           const audioStream = await navigator.mediaDevices.getUserMedia({
@@ -173,8 +160,7 @@ const LiveSessionControls = ({
             audio: true,
           });
         }
-        setLocalMicOn(true);
-        await updateSession({ micOn: true });
+        setIsMicOn(true);
         toast({
           title: "Microphone On",
           description: "Your microphone is now active.",
@@ -190,13 +176,12 @@ const LiveSessionControls = ({
       if (streamRef.current) {
         streamRef.current.getAudioTracks().forEach((track) => track.stop());
       }
-      setLocalMicOn(false);
-      await updateSession({ micOn: false });
+      setIsMicOn(false);
     }
   };
 
   const toggleScreenShare = async () => {
-    if (!localScreenSharing) {
+    if (!isScreenSharing) {
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({
           video: {
@@ -204,7 +189,7 @@ const LiveSessionControls = ({
           },
           audio: true,
         });
-
+        
         screenStreamRef.current = stream;
         if (screenRef.current) {
           screenRef.current.srcObject = stream;
@@ -212,16 +197,14 @@ const LiveSessionControls = ({
 
         // Handle when user stops sharing from browser UI
         stream.getVideoTracks()[0].onended = () => {
-          setLocalScreenSharing(false);
+          setIsScreenSharing(false);
           if (screenRef.current) {
             screenRef.current.srcObject = null;
           }
           screenStreamRef.current = null;
-          updateSession({ screenSharing: false });
         };
 
-        setLocalScreenSharing(true);
-        await updateSession({ screenSharing: true });
+        setIsScreenSharing(true);
         toast({
           title: "🖥️ Screen Sharing Started",
           description: "Your screen is now being shared with students.",
@@ -241,8 +224,7 @@ const LiveSessionControls = ({
       if (screenRef.current) {
         screenRef.current.srcObject = null;
       }
-      setLocalScreenSharing(false);
-      await updateSession({ screenSharing: false });
+      setIsScreenSharing(false);
     }
   };
 
@@ -300,9 +282,9 @@ const LiveSessionControls = ({
               autoPlay
               muted
               playsInline
-              className={`w-full h-full object-cover ${!localCameraOn ? "hidden" : ""}`}
+              className={`w-full h-full object-cover ${!isCameraOn ? "hidden" : ""}`}
             />
-            {!localCameraOn && (
+            {!isCameraOn && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <VideoOff className="h-8 w-8 text-muted-foreground" />
               </div>
@@ -324,9 +306,9 @@ const LiveSessionControls = ({
               autoPlay
               muted
               playsInline
-              className={`w-full h-full object-contain ${!localScreenSharing ? "hidden" : ""}`}
+              className={`w-full h-full object-contain ${!isScreenSharing ? "hidden" : ""}`}
             />
-            {!localScreenSharing && (
+            {!isScreenSharing && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <MonitorOff className="h-8 w-8 text-muted-foreground" />
               </div>
@@ -336,7 +318,7 @@ const LiveSessionControls = ({
                 Screen
               </Badge>
             </div>
-            {localScreenSharing && (
+            {isScreenSharing && (
               <Button
                 size="icon"
                 variant="secondary"
@@ -359,7 +341,7 @@ const LiveSessionControls = ({
             <Button
               size="lg"
               className="bg-success hover:bg-success/90 text-success-foreground"
-              onClick={handleStartSession}
+              onClick={startSession}
             >
               <Phone className="mr-2 h-5 w-5" />
               Start Live Session
@@ -367,12 +349,12 @@ const LiveSessionControls = ({
           ) : (
             <>
               <Button
-                variant={localCameraOn ? "default" : "outline"}
+                variant={isCameraOn ? "default" : "outline"}
                 size="icon"
                 className="h-12 w-12 rounded-full"
                 onClick={toggleCamera}
               >
-                {localCameraOn ? (
+                {isCameraOn ? (
                   <Video className="h-5 w-5" />
                 ) : (
                   <VideoOff className="h-5 w-5" />
@@ -380,12 +362,12 @@ const LiveSessionControls = ({
               </Button>
 
               <Button
-                variant={localMicOn ? "default" : "outline"}
+                variant={isMicOn ? "default" : "outline"}
                 size="icon"
                 className="h-12 w-12 rounded-full"
                 onClick={toggleMic}
               >
-                {localMicOn ? (
+                {isMicOn ? (
                   <Mic className="h-5 w-5" />
                 ) : (
                   <MicOff className="h-5 w-5" />
@@ -393,12 +375,12 @@ const LiveSessionControls = ({
               </Button>
 
               <Button
-                variant={localScreenSharing ? "secondary" : "outline"}
+                variant={isScreenSharing ? "secondary" : "outline"}
                 size="icon"
                 className="h-12 w-12 rounded-full"
                 onClick={toggleScreenShare}
               >
-                {localScreenSharing ? (
+                {isScreenSharing ? (
                   <Monitor className="h-5 w-5" />
                 ) : (
                   <MonitorOff className="h-5 w-5" />
@@ -409,7 +391,7 @@ const LiveSessionControls = ({
                 variant="destructive"
                 size="icon"
                 className="h-12 w-12 rounded-full"
-                onClick={handleEndSession}
+                onClick={endSession}
               >
                 <PhoneOff className="h-5 w-5" />
               </Button>
@@ -420,14 +402,14 @@ const LiveSessionControls = ({
         {/* Status Indicators */}
         {isLive && (
           <div className="flex items-center justify-center gap-4 text-sm text-muted-foreground">
-            <span className={localCameraOn ? "text-success" : ""}>
-              Camera: {localCameraOn ? "On" : "Off"}
+            <span className={isCameraOn ? "text-success" : ""}>
+              Camera: {isCameraOn ? "On" : "Off"}
             </span>
-            <span className={localMicOn ? "text-success" : ""}>
-              Mic: {localMicOn ? "On" : "Off"}
+            <span className={isMicOn ? "text-success" : ""}>
+              Mic: {isMicOn ? "On" : "Off"}
             </span>
-            <span className={localScreenSharing ? "text-success" : ""}>
-              Screen: {localScreenSharing ? "Sharing" : "Off"}
+            <span className={isScreenSharing ? "text-success" : ""}>
+              Screen: {isScreenSharing ? "Sharing" : "Off"}
             </span>
           </div>
         )}

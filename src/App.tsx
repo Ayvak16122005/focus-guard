@@ -6,11 +6,9 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import StudentMonitor from "./pages/StudentMonitor";
-import StudentProfile from "./pages/StudentProfile";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import TeacherClasses from "./pages/TeacherClasses";
 import TeacherClassMonitor from "./pages/TeacherClassMonitor";
-import SessionReport from "./pages/SessionReport";
 import JoinClass from "./pages/JoinClass";
 import NotFound from "./pages/NotFound";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -31,11 +29,6 @@ const App = () => (
               <StudentMonitor />
             </ProtectedRoute>
           } />
-          <Route path="/student/profile" element={
-            <ProtectedRoute>
-              <StudentProfile />
-            </ProtectedRoute>
-          } />
           <Route path="/teacher" element={
             <ProtectedRoute>
               <TeacherDashboard />
@@ -49,11 +42,6 @@ const App = () => (
           <Route path="/teacher/class/:classId" element={
             <ProtectedRoute>
               <TeacherClassMonitor />
-            </ProtectedRoute>
-          } />
-          <Route path="/teacher/class/:classId/report" element={
-            <ProtectedRoute>
-              <SessionReport />
             </ProtectedRoute>
           } />
           <Route path="/join/:code?" element={
