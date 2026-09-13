@@ -136,36 +136,61 @@ const TeacherClassMonitor = () => {
   // Approve join request mutation
   const approveRequestMutation = useMutation({
     mutationFn: async ({ requestId, studentId }: { requestId: string; studentId: string }) => {
-      // Update request status
-      await supabase
+      // Add student to class first (so approval is never recorded without enrollment)
+      const { data: existing } = await supabase
+        .from("class_students")
+        .select("id")
+        .eq("class_id", classId)
+        .eq("student_id", studentId)
+        .maybeSingle();
+
+      if (!existing) {
+        const { error: insertError } = await supabase.from("class_students").insert({
+          class_id: classId!,
+          student_id: studentId,
+        });
+        if (insertError) throw insertError;
+      }
+
+      const { error: updateError } = await supabase
         .from("join_requests")
         .update({ status: "approved", responded_at: new Date().toISOString() })
         .eq("id", requestId);
-
-      // Add student to class
-      await supabase.from("class_students").insert({
-        class_id: classId,
-        student_id: studentId,
-      });
+      if (updateError) throw updateError;
     },
     onSuccess: () => {
       toast({ title: "✓ Student approved and added to class" });
       fetchJoinRequests();
       queryClient.invalidateQueries({ queryKey: ["class-sessions", classId] });
     },
+    onError: (error: any) => {
+      toast({
+        variant: "destructive",
+        title: "Could not approve student",
+        description: error.message,
+      });
+    },
   });
 
   // Reject join request mutation
   const rejectRequestMutation = useMutation({
     mutationFn: async (requestId: string) => {
-      await supabase
+      const { error } = await supabase
         .from("join_requests")
         .update({ status: "rejected", responded_at: new Date().toISOString() })
         .eq("id", requestId);
+      if (error) throw error;
     },
     onSuccess: () => {
       toast({ title: "Request rejected" });
       fetchJoinRequests();
+    },
+    onError: (error: any) => {
+      toast({
+        variant: "destructive",
+        title: "Could not reject request",
+        description: error.message,
+      });
     },
   });
 
