@@ -31,45 +31,35 @@ const JoinClass = () => {
   // Extract code from link input
   const handleLinkInput = (value: string) => {
     setLinkInput(value);
-    // Extract code from URL like /join/ABC123
+    // Extract code from URL like /join/ABC123, or from a plain pasted code
     const match = value.match(/\/join\/([A-Z0-9]{6})/i);
     if (match) {
       setJoinCode(match[1].toUpperCase());
+      return;
     }
+    const cleaned = value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (cleaned.length === 6) setJoinCode(cleaned);
   };
 
-  // Fetch class by join code
+  // Fetch class by join code (uses a secure lookup so non-members can find it)
   const fetchClassData = async (code: string) => {
     if (!code) return null;
 
     try {
-      const classQuery: any = supabase
-        .from("classes")
-        .select("*")
-        .eq("join_code", code.toUpperCase())
-        .eq("is_active", true)
-        .maybeSingle();
+      const { data, error } = await (supabase as any).rpc("lookup_class_by_code", {
+        _code: code.trim().toUpperCase(),
+      });
 
-      const { data: classData, error: classError } = await classQuery;
-
-      if (classError) throw classError;
-      if (!classData) return null;
-
-      const { data: teacherData } = await supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", classData.teacher_id)
-        .single();
-
-      const { count } = await supabase
-        .from("class_students")
-        .select("*", { count: "exact", head: true })
-        .eq("class_id", classData.id);
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row) return null;
 
       return {
-        ...classData,
-        profiles: teacherData,
-        class_students: [{ count: count || 0 }],
+        id: row.id as string,
+        name: row.name as string,
+        description: row.description as string | null,
+        profiles: { full_name: row.teacher_name as string | null },
+        class_students: [{ count: Number(row.student_count) || 0 }],
       };
     } catch (error) {
       console.error("Error fetching class:", error);
@@ -224,7 +214,9 @@ const JoinClass = () => {
               id="joinCode"
               placeholder="XXXXXX"
               value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              onChange={(e) =>
+                setJoinCode(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6))
+              }
               maxLength={6}
               className="text-center text-2xl font-mono font-bold tracking-widest"
             />
