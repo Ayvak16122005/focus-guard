@@ -214,7 +214,9 @@ const JoinClass = () => {
               id="joinCode"
               placeholder="XXXXXX"
               value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+              onChange={(e) =>
+                setJoinCode(e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 6))
+              }
               maxLength={6}
               className="text-center text-2xl font-mono font-bold tracking-widest"
             />
