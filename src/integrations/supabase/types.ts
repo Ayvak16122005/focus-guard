@@ -432,6 +432,16 @@ export type Database = {
         Args: { _class_id: string; _user_id: string }
         Returns: boolean
       }
+      lookup_class_by_code: {
+        Args: { _code: string }
+        Returns: {
+          description: string
+          id: string
+          name: string
+          student_count: number
+          teacher_name: string
+        }[]
+      }
       shares_class_with: {
         Args: { _other_id: string; _user_id: string }
         Returns: boolean
