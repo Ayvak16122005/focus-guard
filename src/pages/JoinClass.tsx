@@ -31,11 +31,14 @@ const JoinClass = () => {
   // Extract code from link input
   const handleLinkInput = (value: string) => {
     setLinkInput(value);
-    // Extract code from URL like /join/ABC123
+    // Extract code from URL like /join/ABC123, or from a plain pasted code
     const match = value.match(/\/join\/([A-Z0-9]{6})/i);
     if (match) {
       setJoinCode(match[1].toUpperCase());
+      return;
     }
+    const cleaned = value.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+    if (cleaned.length === 6) setJoinCode(cleaned);
   };
 
   // Fetch class by join code (uses a secure lookup so non-members can find it)
