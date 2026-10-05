@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791172714615,
+      "tag": "0000_grant_lookup_class_by_code_to_anon",
+      "breakpoints": true
+    }
+  ]
+}
